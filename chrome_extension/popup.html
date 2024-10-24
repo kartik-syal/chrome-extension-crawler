@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crawler Settings</title>
+</head>
+<body>
+    <h3>Crawler Settings</h3>
+    <form id="crawlForm">
+        <label for="crawlName">Crawl Name:</label>
+        <input type="text" id="crawlName" name="crawlName" placeholder="Page Title"><br><br>
+
+        <label for="crawlUrl">Crawl URL:</label>
+        <input type="text" id="crawlUrl" name="crawlUrl" readonly><br><br> <!-- URL field, readonly to avoid editing -->
+
+        <label for="crawlDepth">Crawl Depth:</label>
+        <input type="number" id="crawlDepth" name="crawlDepth" value="1"><br><br>
+
+        <label for="maxLinks">Max Links:</label>
+        <input type="number" id="maxLinks" name="maxLinks" value="100"><br><br>
+
+        <label for="followExternal">Follow External URLs:</label>
+        <input type="checkbox" id="followExternal" name="followExternal"><br><br>
+
+        <label for="concurrency">Concurrency:</label>
+        <input type="number" id="concurrency" name="concurrency" value="5"><br><br>
+
+        <button type="button" id="startCrawl">Start Crawl</button>
+    </form>
+
+    <h3>Crawl Status</h3>
+    <ul id="crawlList"></ul>
+
+    <script src="popup.js"></script>
+</body>
+</html>
