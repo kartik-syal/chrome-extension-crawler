@@ -2,12 +2,12 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from scrapy.utils.project import get_project_settings
-from pydantic import BaseModel
-from concurrent.futures import ThreadPoolExecutor
-from scrapy.crawler import CrawlerProcess
-from .web_scraper.spiders.web_spider import UrlSpider, ContentSpider
-import time
+import subprocess
+import json
+import os
+import sys
+from typing import List
+from uuid import uuid4
 
 app = FastAPI()
 
@@ -18,10 +18,6 @@ class ScrapyRequest(BaseModel):
     depth_limit: int = 2
     concurrent_requests: int = 16
 
-from typing import List
-
-process = CrawlerProcess(get_project_settings())
-
 class UrlAndId(BaseModel):
     url: str
     id: int
@@ -30,40 +26,48 @@ class CrawlContentRequest(BaseModel):
     urls_and_ids: List[UrlAndId]
     delay: float = 0.0  # Delay in seconds between concurrent runs
 
-
 @app.post("/crawl-url/")
-async def crawl_url(scrapy_request: ScrapyRequest):
-    results = []  # List to store results from the spider
+def crawl_url(scrapy_request: ScrapyRequest):
+    # Generate a unique identifier for this crawl session
+    crawl_id = str(uuid4())
+    
+    # Serialize the request data to a JSON string
+    request_data = json.dumps({
+        "crawl_id": crawl_id,
+        "start_urls": scrapy_request.start_urls,
+        "max_links": scrapy_request.max_links,
+        "follow_external": scrapy_request.follow_external,
+        "depth_limit": scrapy_request.depth_limit,
+        "concurrent_requests": scrapy_request.concurrent_requests
+    })
 
-    process.crawl(UrlSpider,
-                   start_urls=scrapy_request.start_urls,
-                   max_links=scrapy_request.max_links,
-                   follow_external=scrapy_request.follow_external,
-                   depth_limit=scrapy_request.depth_limit,
-                   concurrent_requests=scrapy_request.concurrent_requests,
-                   results=results)
+    # Path to run_crawler.py
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    script_path = os.path.join(script_dir, 'run_crawler.py')
 
-    process.start()  # The script will block here until the crawling is finished
+    # Use sys.executable to ensure the correct Python interpreter is used
+    subprocess.Popen([sys.executable, script_path, request_data], cwd=script_dir)
 
-    return {"message": "Crawling completed", "results": results}
+    return {"message": "Crawling started", "crawl_id": crawl_id}
 
 @app.post("/crawl-content/")
 def crawl_content(crawl_request: CrawlContentRequest):
-    results = []  # List to store results from the spider
-    urls = [item.url for item in crawl_request.urls_and_ids]
-    ids = [item.id for item in crawl_request.urls_and_ids]
-    
+    # Generate a unique identifier for this crawl session
+    crawl_id = str(uuid4())
 
-    def run_spider(url, id, delay):
-        process.crawl(ContentSpider, url=url, id=id, results=results)
-        process.start()  # This blocks until the crawling is finished
-        time.sleep(delay)  # Adding delay before starting the crawl
+    # Serialize the request data to a JSON string
+    request_data = json.dumps({
+        "crawl_id": crawl_id,
+        "urls_and_ids": [item.dict() for item in crawl_request.urls_and_ids],
+        "delay": crawl_request.delay
+    })
 
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(run_spider, url, id, crawl_request.delay) for url, id in zip(urls, ids)]
+    # Get the absolute path to run_crawler.py
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    script_path = os.path.join(script_dir, 'run_crawler.py')  # <-- Update here
 
-    # Wait for all threads to complete
-    for future in futures:
-        future.result()
+    # Use sys.executable to ensure the correct Python interpreter is used
+    subprocess.Popen([sys.executable, script_path, request_data], cwd=script_dir)
 
-    return {"message": "Content crawling completed", "results": results}
+    return {"message": "Content crawling started", "crawl_id": crawl_id}
+
