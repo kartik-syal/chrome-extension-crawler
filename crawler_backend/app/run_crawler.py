@@ -29,6 +29,7 @@ def main():
         # Run UrlSpider
         process.crawl(
             UrlSpider,
+            crawl_id=crawl_id,
             start_urls=request_data['start_urls'],
             max_links=request_data.get('max_links', 10),
             follow_external=request_data.get('follow_external', False),
@@ -40,13 +41,12 @@ def main():
         # Run ContentSpider
         urls_and_ids = request_data['urls_and_ids']
         delay = request_data.get('delay', 0.0)
-        for item in urls_and_ids:
-            process.crawl(
-                ContentSpider,
-                url=item['url'],
-                id=item['id'],
-                results=[]
-            )
+        process.crawl(
+            ContentSpider,
+            crawl_id=crawl_id,
+            urls_and_ids=urls_and_ids,
+            results=[]
+        )
     else:
         print("Invalid request data.")
         sys.exit(1)

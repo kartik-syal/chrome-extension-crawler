@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, List
 from datetime import datetime
 
 # Schema for creating website data
@@ -36,3 +36,29 @@ class WebsiteData(BaseModel):
 
     class Config:
         from_attributes = True
+
+class CrawlSessionBase(BaseModel):
+    crawl_id: str
+    status: str
+    spider_name: str
+    start_urls: List[str]
+    created_at: datetime
+    link_count: int
+    max_links: int
+
+    class Config:
+        orm_mode = True
+
+class CrawlSessionCreate(BaseModel):
+    crawl_id: str
+    spider_name: str
+    crawl_type: str
+    start_urls: List[str]
+    max_links: Optional[int] = Field(default=None)
+
+class CrawlSessionUpdate(BaseModel):
+    status: Optional[str] = None
+    pid: Optional[int] = None
+    request_queue: Optional[bytes] = None
+    visited_links: Optional[bytes] = None
+    link_count: Optional[int] = None
