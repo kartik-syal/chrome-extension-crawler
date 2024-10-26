@@ -9,6 +9,7 @@ class WebsiteDataCreate(BaseModel):
     status: Optional[bool] = False
     html: Optional[str] = None
     text: Optional[str] = None
+    crawl_session_id: int
 
     class Config:
         from_attributes = True
@@ -45,16 +46,25 @@ class CrawlSessionBase(BaseModel):
     created_at: datetime
     link_count: int
     max_links: int
+    depth_limit: int
+    follow_external: bool
+    concurrent_requests: int
+    delay: Optional[float] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class CrawlSessionCreate(BaseModel):
+    user_id: str
     crawl_id: str
     spider_name: str
     crawl_type: str
     start_urls: List[str]
     max_links: Optional[int] = Field(default=None)
+    depth_limit: int
+    follow_external: bool
+    concurrent_requests: int
+    delay: float
 
 class CrawlSessionUpdate(BaseModel):
     status: Optional[str] = None
@@ -62,3 +72,26 @@ class CrawlSessionUpdate(BaseModel):
     request_queue: Optional[bytes] = None
     visited_links: Optional[bytes] = None
     link_count: Optional[int] = None
+
+class UserCreate(BaseModel):
+    pass
+
+    class Config:
+        from_attributes = True
+
+
+class CrawlSessionResponse(BaseModel):
+    id: int
+    crawl_id: str
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class UserDataResponse(BaseModel):
+    uuid: str
+    user_data: List[CrawlSessionResponse] = []
+
+    class Config:
+        from_attributes = True

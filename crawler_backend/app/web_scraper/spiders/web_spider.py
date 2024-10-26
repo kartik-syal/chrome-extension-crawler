@@ -1,69 +1,112 @@
-# crawler_backend/app/web_scraper/spiders/web_spider.py
-
 import scrapy
 from app.database import SessionLocal
 from app.schemas import WebsiteDataCreate
 from app import cruds, schemas
-import json
 import pickle
+from scrapy import signals
+import logging
 
-class UrlSpider(scrapy.Spider):
-    name = 'url_spider'
+class WebSpider(scrapy.Spider):
+    name = 'web_spider'
 
-    def __init__(self, crawl_id=None, start_urls=None, max_links=10, *args, **kwargs):
-        super(UrlSpider, self).__init__(*args, **kwargs)
+    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, *args, **kwargs):
+        super(WebSpider, self).__init__(*args, **kwargs)
         self.crawl_id = crawl_id
-        self.max_links = max_links
+        self.max_links = int(max_links)
         self.visited_links = set()
         self.pending_urls = list(start_urls) if start_urls else []
         self.link_count = 0
+        self.follow_external = follow_external
+        self.depth_limit = int(depth_limit)
+        self.concurrent_requests = int(concurrent_requests)
 
-        # Load state from the database if resuming
+        # Custom settings
+        self.custom_settings = {
+            'DEPTH_LIMIT': self.depth_limit,
+            'CONCURRENT_REQUESTS': self.concurrent_requests,
+        }
+
+        # Load state if resuming
         if self.crawl_id:
-            db = SessionLocal()
-            crawl_session = cruds.get_crawl_session(db, self.crawl_id)
-            if crawl_session and crawl_session.status == 'paused':
-                self.logger.info(f"Resuming crawl {self.crawl_id}")
-                if crawl_session.visited_links:
-                    self.visited_links = set(pickle.loads(crawl_session.visited_links))
-                if crawl_session.pending_urls:
-                    self.pending_urls = pickle.loads(crawl_session.pending_urls)
-                self.link_count = crawl_session.link_count or 0
-            db.close()
+            self.load_state()
+
+        # Flag to control crawling state
+        self.should_continue = True
+
+    def load_state(self):
+        db = SessionLocal()
+        self.crawl_session = cruds.get_crawl_session(db, self.crawl_id)
+        if self.crawl_session and self.crawl_session.status == 'paused':
+            self.logger.info(f"Resuming crawl {self.crawl_id}")
+            if self.crawl_session.visited_links:
+                self.visited_links = set(pickle.loads(self.crawl_session.visited_links))
+            if self.crawl_session.pending_urls:
+                loaded_pending_urls = pickle.loads(self.crawl_session.pending_urls)
+                # Filter pending URLs to exclude already visited links
+                self.pending_urls = [url for url in loaded_pending_urls if url not in self.visited_links]
+            self.link_count = self.crawl_session.link_count or 0
+        db.close()
 
     def start_requests(self):
+        # Start from the remaining pending URLs
         for url in self.pending_urls:
-            yield scrapy.Request(url, callback=self.parse)
+            if self.link_count < self.max_links and self.should_continue:
+                yield scrapy.Request(url, callback=self.parse)
 
     def parse(self, response):
+        # Check if the maximum link count has been reached
+        if self.link_count >= self.max_links:
+            self.logger.info("Max link count reached. Stopping further processing.")
+            self.should_continue = False  # Stop processing
+            self.save_current_state()
+            return  # Ensure no further processing if limit reached
+
         db = SessionLocal()
 
-        # Save the current URL if not already visited and within link limits
-        if response.url not in self.visited_links and self.link_count < self.max_links:
+        # Only process the current URL if it hasn't been visited
+        if response.url not in self.visited_links:
             self.visited_links.add(response.url)
-            self.link_count += 1
 
-            # Save the URL in the database
-            website_data = schemas.WebsiteDataCreate(
-                website_url=response.url,
-                status=False
-            )
-            try:
-                created_data = cruds.create_website_data(db=db, website_data=website_data)
-                self.logger.info(f"Saved URL: {response.url} with ID: {created_data.id}")
-            except Exception as e:
-                self.logger.error(f"Error saving URL to database: {e}")
+            # Extract and process page data
+            title = response.css('title::text').get()
+            body_text = ' '.join(response.css('body *::text').getall()).strip()
+            html_content = response.text
+
+            # Save data in the database only if under the link count limit
+            if self.link_count < self.max_links:
+                website_data = schemas.WebsiteDataCreate(
+                    website_url=response.url,
+                    title=title,
+                    text=body_text,
+                    html=html_content,
+                    status=True,  # Mark as completed
+                    crawl_session_id=self.crawl_session.id
+                )
+                try:
+                    created_data = cruds.create_website_data(db=db, website_data=website_data)
+                    self.link_count += 1  # Increment link count after saving successfully
+                    self.logger.info(f"Saved content for URL: {response.url} with ID: {created_data.id}")
+                except Exception as e:
+                    self.logger.error(f"Error saving content to database: {e}")
+
+                # Extract links and add them to the pending list if not visited
+                for next_page in response.css('a::attr(href)').getall():
+                    next_page_url = response.urljoin(next_page)
+
+                    # Only add new URLs if we haven't reached the max_links limit
+                    if (next_page_url not in self.visited_links and 
+                        next_page_url not in self.pending_urls and 
+                        self.link_count < self.max_links and 
+                        self.should_continue):  # Check max_links before queuing new requests
+                        self.pending_urls.append(next_page_url)
+
+                        # Only yield a new request if still under max_links
+                        if self.link_count < self.max_links:
+                            yield scrapy.Request(next_page_url, callback=self.parse)
 
         db.close()
 
-        # Extract links and add to pending URLs if not visited
-        for next_page in response.css('a::attr(href)').getall():
-            next_page_url = response.urljoin(next_page)
-            if next_page_url not in self.visited_links and next_page_url not in self.pending_urls and self.link_count < self.max_links:
-                self.pending_urls.append(next_page_url)
-                yield scrapy.Request(next_page_url, callback=self.parse)
-
-        # Save state periodically
+        # Save the current state periodically
         self.save_state()
 
     def save_state(self):
@@ -71,110 +114,57 @@ class UrlSpider(scrapy.Spider):
         db = SessionLocal()
         crawl_session_update = schemas.CrawlSessionUpdate(
             visited_links=pickle.dumps(list(self.visited_links)),
-            pending_urls=pickle.dumps(self.pending_urls),
+            pending_urls=pickle.dumps(self.pending_urls),  # Save remaining pending URLs
             link_count=self.link_count
         )
         cruds.update_crawl_session(db, self.crawl_id, crawl_session_update)
         db.close()
 
-    def closed(self, reason):
-        # When the spider is closed, save the state
+    def save_current_state(self):
         self.save_state()
-        # Update status in the database
+        self.logger.info("Current state saved.")
+
+    def closed(self, reason):
+        self.save_state()
         db = SessionLocal()
         status = 'completed' if reason == 'finished' else 'paused'
         cruds.update_crawl_session(db, self.crawl_id, schemas.CrawlSessionUpdate(status=status))
         db.close()
 
-class ContentSpider(scrapy.Spider):
-    name = 'content_spider'
+logger = logging.getLogger(__name__)
 
-    def __init__(self, crawl_id=None, url=None, id=None, results=[], *args, **kwargs):
-        super(ContentSpider, self).__init__(*args, **kwargs)
-        self.crawl_id = crawl_id
-        self.results = results
-        self.pending_requests = []
+class StopSpiderMiddleware:
+    def __init__(self):
+        self.crawler = None
 
-        # Load state if resuming
-        self.visited_ids = set()
+    @classmethod
+    def from_crawler(cls, crawler):
+        obj = cls()
+        obj.crawler = crawler
+        crawler.signals.connect(obj.spider_opened, signal=signals.spider_opened)
+        crawler.signals.connect(obj.spider_closed, signal=signals.spider_closed)
+        return obj
 
-        if self.crawl_id:
-            db = SessionLocal()
-            crawl_session = cruds.get_crawl_session(db, self.crawl_id)
-            if crawl_session and crawl_session.status == 'paused':
-                self.logger.info(f"Resuming crawl {self.crawl_id}")
-                if crawl_session.request_queue:
-                    self.pending_requests = pickle.loads(crawl_session.request_queue)
-                else:
-                    self.pending_requests = []
-                if crawl_session.visited_links:
-                    self.visited_ids = set(pickle.loads(crawl_session.visited_links))
-                else:
-                    self.visited_ids = set()
-            else:
-                # Initialize pending requests from start_urls
-                self.pending_requests = [(url, id) for url, id in zip(json.loads(crawl_session.start_urls), [item['id'] for item in kwargs.get('urls_and_ids', [])])]
-                self.visited_ids = set()
-            db.close()
-        else:
-            # Handle case where crawl_id is not provided
-            self.pending_requests = []
-            self.visited_ids = set()
+    def process_response(self, request, response, spider):
+        logger.info(f'Processing response: {response.url} with status: {response.status}')
+        
+        # Example condition to stop the spider
+        if response.status == 403:  # Forbidden
+            spider.crawler.engine.close_spider(spider, 'forbidden_error')
+            # Returning the response here to avoid NoneType error
+            return response
 
-    def start_requests(self):
-        for url, id in self.pending_requests:
-            if id not in self.visited_ids:
-                yield scrapy.Request(url, callback=self.parse, meta={'id': id})
+        # Check for other stopping conditions
+        if response.status == 404:  # Not Found
+            spider.crawler.engine.close_spider(spider, 'page_not_found')
+            # You can still return the response to prevent NoneType error
+            return response
+        
+        # Always return the response if no stopping conditions are met
+        return response
 
-    def parse(self, response):
-        id = response.meta['id']
-        self.visited_ids.add(id)
+    def spider_opened(self, spider):
+        logger.info(f'Spider opened: {spider.name}')
 
-        # Extract content as before
-        title = response.css('title::text').get()
-        body_text = response.css('body *::text').getall()
-        body_text = ' '.join(body_text).strip()
-        html_content = response.text
-
-        db = SessionLocal()
-        try:
-            cruds.update_website_data(
-                db=db,
-                id=id,
-                title=title,
-                text=body_text,
-                html=html_content,
-                status=True  # Mark the status as completed
-            )
-            self.logger.info(f"Successfully updated record ID: {id} with content from {response.url}")
-        except Exception as e:
-            self.logger.error(f"Error updating database: {e}")
-        finally:
-            db.close()
-
-        self.results.append({'id': id, 'content': body_text})
-
-        # Save state periodically
-        self.save_state()
-
-    def save_state(self):
-        # Save the current state to the database
-        db = SessionLocal()
-        crawl_session_update = schemas.CrawlSessionUpdate(
-            request_queue=pickle.dumps(self.pending_requests),
-            visited_links=pickle.dumps(list(self.visited_ids))
-        )
-        cruds.update_crawl_session(db, self.crawl_id, crawl_session_update)
-        db.close()
-
-    def closed(self, reason):
-        # When the spider is closed, save the state
-        self.save_state()
-        # Update the status
-        db = SessionLocal()
-        if reason == 'finished':
-            status = 'completed'
-        else:
-            status = 'stopped'
-        cruds.update_crawl_session(db, self.crawl_id, schemas.CrawlSessionUpdate(status=status, pid=None))
-        db.close()
+    def spider_closed(self, spider):
+        logger.info(f'Spider closed: {spider.name}')

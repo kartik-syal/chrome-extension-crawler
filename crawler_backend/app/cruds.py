@@ -2,15 +2,20 @@ import pickle
 import json
 from sqlalchemy.orm import Session
 from datetime import datetime
-from app.models import WebsiteData, CrawlSession
-from app.schemas import WebsiteDataCreate, CrawlSessionCreate, CrawlSessionUpdate
+from app.models import WebsiteData, CrawlSession, UserData
+from app.schemas import WebsiteDataCreate, CrawlSessionCreate, CrawlSessionUpdate, UserCreate
+import uuid
 
 # Create a new entry for website data
 def create_website_data(db: Session, website_data: WebsiteDataCreate):
     db_website_data = WebsiteData(
         website_url=website_data.website_url,
+        title=website_data.title,
+        html=website_data.html,
+        text=website_data.text,
         status=website_data.status,
         created_at=datetime.now(),
+        crawl_session_id= website_data.crawl_session_id
     )
     db.add(db_website_data)
     db.commit()
@@ -42,6 +47,7 @@ def get_crawl_session(db: Session, crawl_id: str):
 
 def create_crawl_session(db: Session, crawl_session: CrawlSessionCreate):
     db_crawl_session = CrawlSession(
+        user_id=crawl_session.user_id,
         crawl_id=crawl_session.crawl_id,
         spider_name=crawl_session.spider_name,
         crawl_type=crawl_session.crawl_type,
@@ -49,7 +55,11 @@ def create_crawl_session(db: Session, crawl_session: CrawlSessionCreate):
         max_links=crawl_session.max_links,
         status='running',
         visited_links=pickle.dumps([]),  # Initialize as empty
-        pending_urls=pickle.dumps(crawl_session.start_urls)
+        pending_urls=pickle.dumps(crawl_session.start_urls),
+        depth_limit=crawl_session.depth_limit,
+        follow_external=crawl_session.follow_external,
+        concurrent_requests=crawl_session.concurrent_requests,
+        delay=crawl_session.delay
     )
     db.add(db_crawl_session)
     db.commit()
@@ -66,3 +76,31 @@ def update_crawl_session(db: Session, crawl_id: str, crawl_session_update: Crawl
         db.refresh(db_crawl_session)
         return db_crawl_session
     return None
+
+def create_user(db: Session):
+    # Generate a new UUID
+    user_uuid = str(uuid.uuid4())
+    
+    # Create a new user instance
+    db_user = UserData(
+        uuid=user_uuid,
+        # Add any additional fields here if required
+    )
+    
+    db.add(db_user)  # Add the user to the session
+    db.commit()      # Commit the transaction
+    db.refresh(db_user)  # Refresh to get the latest data from the database
+    return db_user   # Return the created user
+
+# Get all crawl sessions for a specific user
+def get_crawl_sessions(db: Session, uuid: str):
+    return db.query(CrawlSession).filter(CrawlSession.user_id == uuid).all()
+
+# Delete a specific crawl session
+def delete_crawl(db: Session, crawl_session_id: int):
+    crawl_session = db.query(CrawlSession).filter(CrawlSession.crawl_id == crawl_session_id).first()
+    if crawl_session:
+        db.delete(crawl_session)
+        db.commit()
+        return True
+    return False

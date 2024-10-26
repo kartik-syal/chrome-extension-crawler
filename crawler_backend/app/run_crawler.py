@@ -2,15 +2,14 @@ import sys
 import os
 import json
 from scrapy.crawler import CrawlerProcess
-from scrapy.utils.project import get_project_settings  # <-- Import here
+from scrapy.utils.project import get_project_settings
 
 # Add the project root directory to sys.path
 project_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(project_root)
 
 # Now imports from app should work
-from app.web_scraper.spiders.web_spider import UrlSpider, ContentSpider
-
+from app.web_scraper.spiders.web_spider import WebSpider  # Import the combined spider
 
 def main():
     if len(sys.argv) < 2:
@@ -24,27 +23,17 @@ def main():
     # Initialize the crawler process
     process = CrawlerProcess(get_project_settings())
 
-    # Run the spider based on the request data
+    # Run the CombinedSpider based on the request data
     if 'start_urls' in request_data:
-        # Run UrlSpider
         process.crawl(
-            UrlSpider,
+            WebSpider,
             crawl_id=crawl_id,
             start_urls=request_data['start_urls'],
             max_links=request_data.get('max_links', 10),
             follow_external=request_data.get('follow_external', False),
             depth_limit=request_data.get('depth_limit', 2),
+            delay=request_data.get('delay', 0.1),
             concurrent_requests=request_data.get('concurrent_requests', 16),
-            results=[]
-        )
-    elif 'urls_and_ids' in request_data:
-        # Run ContentSpider
-        urls_and_ids = request_data['urls_and_ids']
-        delay = request_data.get('delay', 0.0)
-        process.crawl(
-            ContentSpider,
-            crawl_id=crawl_id,
-            urls_and_ids=urls_and_ids,
             results=[]
         )
     else:
