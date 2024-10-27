@@ -20,6 +20,7 @@ app = FastAPI()
 crawler_processes = {}
 
 class ScrapyRequest(BaseModel):
+    crawl_name: str
     start_urls: List[str]
     max_links: int = 10
     follow_external: bool = False
@@ -59,6 +60,7 @@ def crawl(scrapy_request: ScrapyRequest):
     crawl_session = schemas.CrawlSessionCreate(
         user_id = scrapy_request.user_id,
         crawl_id=crawl_id,
+        crawl_name=scrapy_request.crawl_name,
         spider_name='web_spider',
         crawl_type='url_crawl',  # Can indicate it's a combined crawl
         start_urls=scrapy_request.start_urls,
@@ -145,51 +147,6 @@ def resume_crawl(request: CrawlControlRequest):
         else:
             raise HTTPException(status_code=404, detail="Crawl session not found or not in paused state")
 
-# crawler_backend/app/main.py
-
-# @app.post("/crawl-content/")
-# def crawl_content(crawl_request: CrawlContentRequest):
-#     # Generate a unique identifier for this crawl session
-#     crawl_id = str(uuid4())
-
-#     # Extract URLs and IDs
-#     urls_and_ids = [item.dict() for item in crawl_request.urls_and_ids]
-#     urls = [item['url'] for item in urls_and_ids]
-
-#     # Create a crawl session in the database
-#     db = next(database.get_db())
-#     crawl_session = schemas.CrawlSessionCreate(
-#         crawl_id=crawl_id,
-#         spider_name='content_spider',
-#         crawl_type='content_crawl',
-#         start_urls=urls,
-#         max_links=None
-#     )
-#     cruds.create_crawl_session(db, crawl_session)
-#     db.close()
-
-#     # Serialize the request data to a JSON string
-#     request_data = json.dumps({
-#         "crawl_id": crawl_id,
-#         "urls_and_ids": urls_and_ids,
-#         "delay": crawl_request.delay
-#     })
-
-#     # Get the absolute path to run_crawler.py
-#     script_dir = os.path.dirname(os.path.realpath(__file__))
-#     script_path = os.path.join(script_dir, 'run_crawler.py')
-
-#     # Start the crawler process
-#     process = subprocess.Popen([sys.executable, script_path, request_data], cwd=script_dir)
-#     pid = process.pid
-
-#     # Update the CrawlSession with the PID
-#     db = next(database.get_db())
-#     cruds.update_crawl_session(db, crawl_id, schemas.CrawlSessionUpdate(pid=pid))
-#     db.close()
-
-#     return {"message": "Content crawling started", "crawl_id": crawl_id}
-
 @app.post("/create-user/")  # Specify the response model to return
 def create_user_endpoint():
     # Retrieve the session from the database
@@ -212,6 +169,7 @@ def get_user_crawl_sessions(get_crawl: GetAllCrawls):
         {
             "id": session.id,
             "crawl_id": session.crawl_id,
+            "crawl_name": session.crawl_name,
             "status": session.status,
             "created_at": session.created_at,
         }

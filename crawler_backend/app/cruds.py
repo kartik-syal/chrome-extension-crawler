@@ -49,6 +49,7 @@ def create_crawl_session(db: Session, crawl_session: CrawlSessionCreate):
     db_crawl_session = CrawlSession(
         user_id=crawl_session.user_id,
         crawl_id=crawl_session.crawl_id,
+        crawl_name=crawl_session.crawl_name,
         spider_name=crawl_session.spider_name,
         crawl_type=crawl_session.crawl_type,
         start_urls=json.dumps(crawl_session.start_urls),  # Ensure start_urls is serialized to JSON

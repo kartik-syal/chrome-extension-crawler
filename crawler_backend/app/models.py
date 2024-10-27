@@ -24,6 +24,7 @@ class CrawlSession(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     crawl_id = Column(String, index=True, unique=True)
+    crawl_name = Column(String)
     pid = Column(Integer, nullable=True)
     status = Column(String, default='running')  # 'running', 'paused', 'completed'
     created_at = Column(DateTime, default=datetime.now)

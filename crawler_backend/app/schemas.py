@@ -57,6 +57,7 @@ class CrawlSessionBase(BaseModel):
 class CrawlSessionCreate(BaseModel):
     user_id: str
     crawl_id: str
+    crawl_name: str
     spider_name: str
     crawl_type: str
     start_urls: List[str]

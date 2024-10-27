@@ -3,34 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crawler Settings</title>
+    <title>Crawl Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
 <body>
-    <h3>Crawler Settings</h3>
-    <form id="crawlForm">
-        <label for="crawlName">Crawl Name:</label>
-        <input type="text" id="crawlName" name="crawlName" placeholder="Page Title"><br><br>
+    <div id="crawlListContainer">
+        <h3>Crawler Manager</h3>
+        <div class="icon-buttons">
+            <i id="refreshCrawls" class="fas fa-sync-alt" title="Refresh"></i>
+            <i id="createCrawlBtn" class="fas fa-plus" title="Create Crawl"></i>
+        </div>
+        
+        <table id="crawlTable">
+            <thead>
+                <tr>
+                    <th>Crawl Name</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="crawlList">
+                <!-- Crawl entries will go here -->
+            </tbody>
+        </table>
+    </div>
 
-        <label for="crawlUrl">Crawl URL:</label>
-        <input type="text" id="crawlUrl" name="crawlUrl" readonly><br><br> <!-- URL field, readonly to avoid editing -->
+    <div id="newCrawlContainer" style="display: none;">
+        <h3>New Crawl Configuration</h3>
+        <form id="newCrawlForm">
+            <label for="crawlName">Crawl Name:</label>
+            <input type="text" id="crawlName" required><br>
 
-        <label for="crawlDepth">Crawl Depth:</label>
-        <input type="number" id="crawlDepth" name="crawlDepth" value="1"><br><br>
+            <label for="startUrl">Crawl URL:</label>
+            <input type="text" id="startUrl" required><br>
 
-        <label for="maxLinks">Max Links:</label>
-        <input type="number" id="maxLinks" name="maxLinks" value="100"><br><br>
+            <label for="modeToggle">Mode:</label>
+            <div class="mode-toggle">
+                <span>Server</span>
+                <label class="switch">
+                    <input type="checkbox" id="modeToggle">
+                    <span class="slider"></span>
+                </label>
+                <span>Client</span>
+            </div>
+            <p id="modeUnavailable" class="unavailable-message" style="display: none;">Coming soon!</p>
 
-        <label for="followExternal">Follow External URLs:</label>
-        <input type="checkbox" id="followExternal" name="followExternal"><br><br>
+            <label for="crawlDepth">Crawl Depth:</label>
+            <input type="number" id="crawlDepth" value="1"><br>
 
-        <label for="concurrency">Concurrency:</label>
-        <input type="number" id="concurrency" name="concurrency" value="5"><br><br>
+            <label for="maxLinks">Max Links:</label>
+            <input type="number" id="maxLinks" value="100"><br>
 
-        <button type="button" id="startCrawl">Start Crawl</button>
-    </form>
+            <label for="followExternal">Follow External URLs:</label>
+            <input type="checkbox" id="followExternal"><br>
 
-    <h3>Crawl Status</h3>
-    <ul id="crawlList"></ul>
+            <label for="concurrency">Concurrency:</label>
+            <input type="number" id="concurrency" value="12"><br>
+
+            <label for="delay">Delay (seconds):</label>
+            <input type="number" id="delay" step="0.1" value="1"><br>
+
+            <button type="submit">Create Crawl</button>
+            <button type="button" id="backToCrawls">Back</button>
+        </form>
+    </div>
 
     <script src="popup.js"></script>
 </body>
