@@ -130,3 +130,10 @@ input:checked + .slider:before {
     font-size: 12px;
     margin-top: 5px;
 }
+
+.favicon {
+    width: 15px;
+    vertical-align: middle;
+    float: left;
+    margin-right: 6px;
+}

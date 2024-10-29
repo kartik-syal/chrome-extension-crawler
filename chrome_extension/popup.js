@@ -37,7 +37,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     async function displayCrawls() {
         const uuid = await getUserUUID();
         if (!uuid) {
-            document.getElementById("crawlList").innerHTML = "<tr><td colspan='3'>Failed to create user. Please try again.</td></tr>";
+            document.getElementById("crawlList").innerHTML = "<tr><td colspan='4'>Failed to create user. Please try again.</td></tr>";
             return;
         }
 
@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         crawlList.innerHTML = '';  // Clear current list
 
         if (crawls.length === 0) {
-            crawlList.innerHTML = "<tr><td colspan='3'>No crawls found.</td></tr>";
+            crawlList.innerHTML = "<tr><td colspan='4'>No crawls found.</td></tr>";
         } else {
             crawls.forEach((crawl) => {
                 const crawlRow = document.createElement("tr");
@@ -57,7 +57,10 @@ document.addEventListener("DOMContentLoaded", async function () {
                 else if (crawl.status === "paused") statusClass = "status-paused";
 
                 crawlRow.innerHTML = `
-                    <td>${crawl.crawl_name}</td>
+                    <td style="display: flex; align-items: center;">
+                        <img src="${crawl.favicon}" alt="favicon" class="favicon" />
+                        ${crawl.crawl_name}
+                    </td>
                     <td class="${statusClass}">${crawl.status}</td>
                     <td>
                         ${crawl.status === "completed" ? "" : `
