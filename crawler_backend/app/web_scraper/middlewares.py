@@ -7,6 +7,7 @@ from scrapy import signals
 
 # useful for handling different item types with a single interface
 from itemadapter import is_item, ItemAdapter
+from scrapy.exceptions import IgnoreRequest
 
 
 class WebScraperSpiderMiddleware:
@@ -101,3 +102,11 @@ class WebScraperDownloaderMiddleware:
 
     def spider_opened(self, spider):
         spider.logger.info("Spider opened: %s" % spider.name)
+
+
+class ExcludeFileTypesMiddleware:
+    EXCLUDED_EXTENSIONS = ['.dmg', '.exe', '.zip', '.pdf', '.iso']  # Add other binary extensions as needed
+
+    def process_request(self, request, spider):
+        if any(request.url.endswith(ext) for ext in self.EXCLUDED_EXTENSIONS):
+            raise IgnoreRequest(f"Excluded file type for URL: {request.url}")

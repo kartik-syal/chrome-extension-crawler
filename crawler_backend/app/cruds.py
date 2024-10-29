@@ -15,7 +15,8 @@ def create_website_data(db: Session, website_data: WebsiteDataCreate):
         text=website_data.text,
         status=website_data.status,
         created_at=datetime.now(),
-        crawl_session_id= website_data.crawl_session_id
+        crawl_session_id= website_data.crawl_session_id,
+        favicon_url=website_data.favicon_url
     )
     db.add(db_website_data)
     db.commit()
@@ -60,7 +61,8 @@ def create_crawl_session(db: Session, crawl_session: CrawlSessionCreate):
         depth_limit=crawl_session.depth_limit,
         follow_external=crawl_session.follow_external,
         concurrent_requests=crawl_session.concurrent_requests,
-        delay=crawl_session.delay
+        delay=crawl_session.delay,
+        favicon_url=crawl_session.favicon_url
     )
     db.add(db_crawl_session)
     db.commit()

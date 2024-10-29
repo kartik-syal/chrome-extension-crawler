@@ -15,6 +15,7 @@ class WebsiteData(Base):
     html = Column(Text)                               # Full HTML content
     text = Column(Text)                               # Extracted text content
     crawl_session_id = Column(Integer, ForeignKey('crawl_session.id'), index=True)  # Foreign key reference
+    favicon_url = Column(Text)
 
     # Relationship to access CrawlSession from WebsiteData
     crawl_session = relationship("CrawlSession", back_populates="website_data")
@@ -46,6 +47,7 @@ class CrawlSession(Base):
 
     # Relationship to access CrawlSession from WebsiteData
     user = relationship("UserData", back_populates="user_data")
+    favicon_url = Column(Text)
 
 
 class UserData(Base):

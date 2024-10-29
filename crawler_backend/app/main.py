@@ -14,6 +14,9 @@ from app import cruds, database, schemas
 import signal
 from app.database import SessionLocal
 from app.cruds import *
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 app = FastAPI()
 
@@ -57,6 +60,8 @@ def crawl(scrapy_request: ScrapyRequest):
 
     # Create a crawl session in the database
     db = next(database.get_db())
+    print("url = ",scrapy_request.start_urls[0])
+    favicon_url = get_favicon_url(scrapy_request.start_urls[0])
     crawl_session = schemas.CrawlSessionCreate(
         user_id = scrapy_request.user_id,
         crawl_id=crawl_id,
@@ -69,6 +74,7 @@ def crawl(scrapy_request: ScrapyRequest):
         depth_limit=scrapy_request.depth_limit,
         concurrent_requests=scrapy_request.concurrent_requests,
         delay=scrapy_request.delay,
+        favicon_url=favicon_url
     )
     cruds.create_crawl_session(db, crawl_session)
     db.close()
@@ -172,6 +178,7 @@ def get_user_crawl_sessions(get_crawl: GetAllCrawls):
             "crawl_name": session.crawl_name,
             "status": session.status,
             "created_at": session.created_at,
+            "favicon": session.favicon_url
         }
         for session in crawl_sessions
     ]
@@ -187,3 +194,30 @@ def delete_crawl_session(delete_crawl_session: DeleteCrawlSession):
     if not success:
         raise HTTPException(status_code=404, detail="Crawl session not found")
     return {"success": True, "message": "session deleted successfully."}
+
+def get_favicon_url(page_url):
+    try:
+        print("going to get favicon url")
+        # Fetch the page content
+        response = requests.get(page_url, timeout=10)
+        response.raise_for_status()  # Check if the request was successful
+
+        # Parse the HTML content
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Look for favicon link tags in common formats
+        icon_link = soup.find("link", rel="icon") or soup.find("link", rel="shortcut icon")
+
+        # If a favicon link is found, build its absolute URL
+        if icon_link and 'href' in icon_link.attrs:
+            print("going to get favicon url 111")
+            favicon_url = urljoin(page_url, icon_link['href'])
+            return favicon_url
+        else:
+            print("going to get favicon url 222")
+            # Fallback: Assume default location for favicon (domain root)
+            return urljoin(page_url, '/favicon.ico')
+    
+    except requests.RequestException as e:
+        print("Error fetching page:", e)
+        return None

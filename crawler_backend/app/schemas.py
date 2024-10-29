@@ -10,7 +10,7 @@ class WebsiteDataCreate(BaseModel):
     html: Optional[str] = None
     text: Optional[str] = None
     crawl_session_id: int
-
+    favicon_url: str
     class Config:
         from_attributes = True
 
@@ -66,6 +66,7 @@ class CrawlSessionCreate(BaseModel):
     follow_external: bool
     concurrent_requests: int
     delay: float
+    favicon_url: str
 
 class CrawlSessionUpdate(BaseModel):
     status: Optional[str] = None

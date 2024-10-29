@@ -5,6 +5,7 @@ from app import cruds, schemas
 import pickle
 from scrapy import signals
 import logging
+from urllib.parse import urljoin
 
 class WebSpider(scrapy.Spider):
     name = 'web_spider'
@@ -70,7 +71,15 @@ class WebSpider(scrapy.Spider):
             title = response.css('title::text').get()
             body_text = ' '.join(response.css('body *::text').getall()).strip()
             html_content = response.text
-            
+            # Extract favicon URL from <link rel="icon" href="...">
+            favicon_url = response.css("link[rel~='icon']::attr(href)").get()
+            if favicon_url:
+                favicon_url = urljoin(response.url, favicon_url)
+                
+            else:
+                # If not found, check for default /favicon.ico
+                favicon_url = urljoin(response.url, "/favicon.ico")
+                
             if self.link_count < self.max_links:
                 website_data = schemas.WebsiteDataCreate(
                     website_url=response.url,
@@ -78,7 +87,8 @@ class WebSpider(scrapy.Spider):
                     text=body_text,
                     html=html_content,
                     status=True,
-                    crawl_session_id=self.crawl_session.id
+                    crawl_session_id=self.crawl_session.id,
+                    favicon_url=favicon_url
                 )
                 try:
                     cruds.create_website_data(db=db, website_data=website_data)
