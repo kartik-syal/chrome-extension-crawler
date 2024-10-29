@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 class WebSpider(scrapy.Spider):
     name = 'web_spider'
 
-    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, *args, **kwargs):
+    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, breadth_first=True, *args, **kwargs):
         super(WebSpider, self).__init__(*args, **kwargs)
         self.crawl_id = crawl_id
         self.max_links = int(max_links)
@@ -20,6 +20,7 @@ class WebSpider(scrapy.Spider):
         self.follow_external = follow_external
         self.depth_limit = int(depth_limit)
         self.concurrent_requests = int(concurrent_requests)
+        self.breadth_first = breadth_first
 
         # Custom settings
         self.custom_settings = {
@@ -94,14 +95,14 @@ class WebSpider(scrapy.Spider):
                     cruds.create_website_data(db=db, website_data=website_data)
                     self.link_count += 1
                     self.logger.info(f"Saved content for URL: {response.url}. Links processed: {self.link_count}/{self.max_links}")
-                    
+
                     # Update crawl session link count
                     cruds.update_crawl_session(
-                        db, 
+                        db,
                         self.crawl_id,
                         schemas.CrawlSessionUpdate(link_count=self.link_count)
                     )
-                    
+
                     # If max links reached after saving, close spider
                     if self.link_count >= self.max_links:
                         self.logger.info("Max links reached after saving. Closing spider.")
@@ -112,12 +113,22 @@ class WebSpider(scrapy.Spider):
 
             # Extract and queue new links if under max_links
             if self.link_count < self.max_links:
-                for next_page in response.css('a::attr(href)').getall():
-                    next_page_url = response.urljoin(next_page)
-                    if (next_page_url not in self.visited_links and 
-                        next_page_url not in self.pending_urls):
-                        self.pending_urls.append(next_page_url)
-                        yield scrapy.Request(next_page_url, callback=self.parse)
+                next_pages = response.css('a::attr(href)').getall()
+                if self.breadth_first:
+                    # Breadth-first approach
+                    for next_page in next_pages:
+                        next_page_url = response.urljoin(next_page)
+                        if (next_page_url not in self.visited_links and 
+                            next_page_url not in self.pending_urls):
+                            self.pending_urls.append(next_page_url)
+                            yield scrapy.Request(next_page_url, callback=self.parse)
+                else:
+                    # Depth-first approach
+                    for next_page in next_pages:
+                        next_page_url = response.urljoin(next_page)
+                        if (next_page_url not in self.visited_links and 
+                            next_page_url not in self.pending_urls):
+                            yield scrapy.Request(next_page_url, callback=self.parse)
 
         db.close()
         self.save_state()

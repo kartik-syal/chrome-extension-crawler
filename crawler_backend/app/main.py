@@ -56,6 +56,7 @@ def crawl(scrapy_request: ScrapyRequest):
         "depth_limit": scrapy_request.depth_limit,
         "concurrent_requests": scrapy_request.concurrent_requests,
         "delay": scrapy_request.delay,
+        "breadth_first": scrapy_request.breadth_first
     }
 
     # Create a crawl session in the database
@@ -74,7 +75,8 @@ def crawl(scrapy_request: ScrapyRequest):
         depth_limit=scrapy_request.depth_limit,
         concurrent_requests=scrapy_request.concurrent_requests,
         delay=scrapy_request.delay,
-        favicon_url=favicon_url
+        favicon_url=favicon_url,
+        breadth_first=scrapy_request.breadth_first
     )
     cruds.create_crawl_session(db, crawl_session)
     db.close()
