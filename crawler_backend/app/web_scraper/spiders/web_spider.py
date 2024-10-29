@@ -1,7 +1,10 @@
 import scrapy
 from app.database import SessionLocal
+from app.schemas import WebsiteDataCreate
 from app import cruds, schemas
 import pickle
+from scrapy import signals
+import logging
 
 class WebSpider(scrapy.Spider):
     name = 'web_spider'
@@ -52,8 +55,8 @@ class WebSpider(scrapy.Spider):
 
     def parse(self, response):
         # Check if the maximum link count has been reached
-        if self.link_count >= self.max_links or not self.should_continue:
-            self.logger.info("Max link count reached or stopped by user. Saving and stopping.")
+        if self.link_count >= self.max_links:
+            self.logger.info("Max link count reached. Stopping further processing.")
             self.should_continue = False  # Stop processing
             self.save_current_state()
             return  # Ensure no further processing if limit reached
@@ -98,7 +101,7 @@ class WebSpider(scrapy.Spider):
                         self.pending_urls.append(next_page_url)
 
                         # Only yield a new request if still under max_links
-                        if self.link_count < self.max_links and self.should_continue:
+                        if self.link_count < self.max_links:
                             yield scrapy.Request(next_page_url, callback=self.parse)
 
         db.close()
@@ -127,3 +130,41 @@ class WebSpider(scrapy.Spider):
         status = 'completed' if reason == 'finished' else 'paused'
         cruds.update_crawl_session(db, self.crawl_id, schemas.CrawlSessionUpdate(status=status))
         db.close()
+
+logger = logging.getLogger(__name__)
+
+class StopSpiderMiddleware:
+    def __init__(self):
+        self.crawler = None
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        obj = cls()
+        obj.crawler = crawler
+        crawler.signals.connect(obj.spider_opened, signal=signals.spider_opened)
+        crawler.signals.connect(obj.spider_closed, signal=signals.spider_closed)
+        return obj
+
+    def process_response(self, request, response, spider):
+        logger.info(f'Processing response: {response.url} with status: {response.status}')
+        
+        # Example condition to stop the spider
+        if response.status == 403:  # Forbidden
+            spider.crawler.engine.close_spider(spider, 'forbidden_error')
+            # Returning the response here to avoid NoneType error
+            return response
+
+        # Check for other stopping conditions
+        if response.status == 404:  # Not Found
+            spider.crawler.engine.close_spider(spider, 'page_not_found')
+            # You can still return the response to prevent NoneType error
+            return response
+        
+        # Always return the response if no stopping conditions are met
+        return response
+
+    def spider_opened(self, spider):
+        logger.info(f'Spider opened: {spider.name}')
+
+    def spider_closed(self, spider):
+        logger.info(f'Spider closed: {spider.name}')
