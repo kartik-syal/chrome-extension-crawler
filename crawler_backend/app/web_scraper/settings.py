@@ -53,9 +53,6 @@ ROBOTSTXT_OBEY = True
 #DOWNLOADER_MIDDLEWARES = {
 #    "web_scraper.middlewares.WebScraperDownloaderMiddleware": 543,
 #}
-DOWNLOADER_MIDDLEWARES = {
-    'web_scraper.spiders.web_spider.StopSpiderMiddleware': 543,
-}
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
