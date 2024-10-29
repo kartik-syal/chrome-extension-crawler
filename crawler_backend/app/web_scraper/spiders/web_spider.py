@@ -54,59 +54,62 @@ class WebSpider(scrapy.Spider):
                 yield scrapy.Request(url, callback=self.parse)
 
     def parse(self, response):
-        # Check if the maximum link count has been reached
+        # Check if max links reached before processing
         if self.link_count >= self.max_links:
-            self.logger.info("Max link count reached. Stopping further processing.")
-            self.should_continue = False  # Stop processing
-            self.save_current_state()
-            return  # Ensure no further processing if limit reached
+            self.logger.info(f"Max links ({self.max_links}) reached. Stopping crawler.")
+            self.crawler.engine.close_spider(self, 'finished')
+            return
 
         db = SessionLocal()
-
-        # Only process the current URL if it hasn't been visited
+        
+        # Only process if URL not already visited
         if response.url not in self.visited_links:
             self.visited_links.add(response.url)
-
-            # Extract and process page data
+            
+            # Extract and save page data
             title = response.css('title::text').get()
             body_text = ' '.join(response.css('body *::text').getall()).strip()
             html_content = response.text
-
-            # Save data in the database only if under the link count limit
+            
             if self.link_count < self.max_links:
                 website_data = schemas.WebsiteDataCreate(
                     website_url=response.url,
                     title=title,
                     text=body_text,
                     html=html_content,
-                    status=True,  # Mark as completed
+                    status=True,
                     crawl_session_id=self.crawl_session.id
                 )
                 try:
-                    created_data = cruds.create_website_data(db=db, website_data=website_data)
-                    self.link_count += 1  # Increment link count after saving successfully
-                    self.logger.info(f"Saved content for URL: {response.url} with ID: {created_data.id}")
+                    cruds.create_website_data(db=db, website_data=website_data)
+                    self.link_count += 1
+                    self.logger.info(f"Saved content for URL: {response.url}. Links processed: {self.link_count}/{self.max_links}")
+                    
+                    # Update crawl session link count
+                    cruds.update_crawl_session(
+                        db, 
+                        self.crawl_id,
+                        schemas.CrawlSessionUpdate(link_count=self.link_count)
+                    )
+                    
+                    # If max links reached after saving, close spider
+                    if self.link_count >= self.max_links:
+                        self.logger.info("Max links reached after saving. Closing spider.")
+                        self.crawler.engine.close_spider(self, 'finished')
+                        return
                 except Exception as e:
-                    self.logger.error(f"Error saving content to database: {e}")
+                    self.logger.error(f"Error saving content: {e}")
 
-                # Extract links and add them to the pending list if not visited
+            # Extract and queue new links if under max_links
+            if self.link_count < self.max_links:
                 for next_page in response.css('a::attr(href)').getall():
                     next_page_url = response.urljoin(next_page)
-
-                    # Only add new URLs if we haven't reached the max_links limit
                     if (next_page_url not in self.visited_links and 
-                        next_page_url not in self.pending_urls and 
-                        self.link_count < self.max_links and 
-                        self.should_continue):  # Check max_links before queuing new requests
+                        next_page_url not in self.pending_urls):
                         self.pending_urls.append(next_page_url)
-
-                        # Only yield a new request if still under max_links
-                        if self.link_count < self.max_links:
-                            yield scrapy.Request(next_page_url, callback=self.parse)
+                        yield scrapy.Request(next_page_url, callback=self.parse)
 
         db.close()
-
-        # Save the current state periodically
         self.save_state()
 
     def save_state(self):
@@ -127,7 +130,8 @@ class WebSpider(scrapy.Spider):
     def closed(self, reason):
         self.save_state()
         db = SessionLocal()
-        status = 'completed' if reason == 'finished' else 'paused'
+        # Update status based on reason
+        status = 'completed' if reason in ['finished', 'max_links_reached'] else 'paused'
         cruds.update_crawl_session(db, self.crawl_id, schemas.CrawlSessionUpdate(status=status))
         db.close()
 
@@ -146,21 +150,15 @@ class StopSpiderMiddleware:
         return obj
 
     def process_response(self, request, response, spider):
-        logger.info(f'Processing response: {response.url} with status: {response.status}')
+        if hasattr(spider, 'link_count') and hasattr(spider, 'max_links'):
+            if spider.link_count >= spider.max_links:
+                spider.crawler.engine.close_spider(spider, 'finished')
+                return response
         
-        # Example condition to stop the spider
-        if response.status == 403:  # Forbidden
-            spider.crawler.engine.close_spider(spider, 'forbidden_error')
-            # Returning the response here to avoid NoneType error
+        if response.status in [403, 404]:
+            spider.logger.warning(f"Received {response.status} for URL: {response.url}")
             return response
-
-        # Check for other stopping conditions
-        if response.status == 404:  # Not Found
-            spider.crawler.engine.close_spider(spider, 'page_not_found')
-            # You can still return the response to prevent NoneType error
-            return response
-        
-        # Always return the response if no stopping conditions are met
+            
         return response
 
     def spider_opened(self, spider):
