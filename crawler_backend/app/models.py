@@ -43,6 +43,7 @@ class CrawlSession(Base):
     follow_external = Column(Boolean, nullable=True, default=False)
     concurrent_requests = Column(Integer, nullable=True)
     delay = Column(Float, nullable=True)
+    only_child_pages = Column(Boolean, default=False)
     user_id = Column(String, ForeignKey('user_data.uuid'), index=True)  # Foreign key reference
 
     # Relationship to access CrawlSession from WebsiteData

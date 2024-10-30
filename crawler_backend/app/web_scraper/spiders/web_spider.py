@@ -7,11 +7,15 @@ from scrapy import signals
 import logging
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse
+import re
+from scrapy.linkextractors import LinkExtractor
+from scrapy.spiders import Rule
 
 class WebSpider(scrapy.Spider):
     name = 'web_spider'
 
-    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, *args, **kwargs):
+    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, only_child_pages=False, *args, **kwargs):
         super(WebSpider, self).__init__(*args, **kwargs)
         self.crawl_id = crawl_id
         self.max_links = int(max_links)
@@ -21,6 +25,19 @@ class WebSpider(scrapy.Spider):
         self.follow_external = follow_external
         self.depth_limit = int(depth_limit)
         self.concurrent_requests = int(concurrent_requests)
+        self.only_child_pages = only_child_pages
+
+        # Set path restriction for child pages
+        if only_child_pages and start_urls:
+            parsed_url = urlparse(start_urls[0])
+            base_path = parsed_url.path.rstrip('/')
+
+            # Build regex to match links within the base path or sub-paths
+            self.path_regex = re.escape(base_path) + r'(/.*)?$'  # Allows links under the start path
+            self.domain = parsed_url.netloc
+        else:
+            self.path_regex = None
+            self.domain = None
 
         # Custom settings
         self.custom_settings = {
@@ -124,6 +141,8 @@ class WebSpider(scrapy.Spider):
                             schemas.CrawlSessionUpdate(link_count=self.link_count)
                         )
                         
+                        self.link_count += 1
+                        
                         # If max links reached after saving, close spider
                         if self.link_count >= self.max_links:
                             self.logger.info("Max links reached after saving. Closing spider.")
@@ -134,14 +153,15 @@ class WebSpider(scrapy.Spider):
 
                 # Extract and queue new links if under max_links
                 if self.link_count < self.max_links:
-                    for next_page in response.css('a::attr(href)').getall():
-                        next_page_url = response.urljoin(next_page)
-                        # Only follow URLs with HTTP or HTTPS schemes
-                        if next_page_url.startswith("http"):
-                            if (next_page_url not in self.visited_links and 
-                                next_page_url not in self.pending_urls):
-                                self.pending_urls.append(next_page_url)
-                                yield scrapy.Request(next_page_url, callback=self.parse)
+                    link_extractor = LinkExtractor(
+                        allow=self.path_regex if self.only_child_pages else None,
+                        allow_domains=self.domain if self.only_child_pages else None
+                    )
+                    for link in link_extractor.extract_links(response):
+                        next_page_url = link.url
+                        if next_page_url.startswith("http") and next_page_url not in self.visited_links and next_page_url not in self.pending_urls:
+                            self.pending_urls.append(next_page_url)
+                            yield scrapy.Request(next_page_url, callback=self.parse)
 
             self.save_state()
 
