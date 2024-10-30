@@ -6,6 +6,7 @@ import pickle
 from scrapy import signals
 import logging
 from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 class WebSpider(scrapy.Spider):
     name = 'web_spider'
@@ -48,6 +49,33 @@ class WebSpider(scrapy.Spider):
             self.link_count = self.crawl_session.link_count or 0
         db.close()
 
+    def extract_text_content(self, response):
+        soup = BeautifulSoup(response.body, 'html.parser')
+
+        # Remove script and style elements
+        for script in soup(["script", "style", "noscript", "iframe"]):
+            script.decompose()
+
+        # Get text and clean it
+        text = soup.get_text(separator=' ', strip=True)
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        return text
+
+    def extract_favicon(self, response):
+        # Try common favicon locations
+        favicon_urls = [
+            response.urljoin('/favicon.ico'),
+            response.css('link[rel*="icon"]::attr(href)').get(),
+            response.css('link[rel*="shortcut icon"]::attr(href)').get()
+        ]
+
+        # Return first valid favicon URL found
+        for url in favicon_urls:
+            if url:
+                return response.urljoin(url)
+        return None
+
     def start_requests(self):
         # Start from the remaining pending URLs
         for url in self.pending_urls:
@@ -61,66 +89,61 @@ class WebSpider(scrapy.Spider):
             self.crawler.engine.close_spider(self, 'finished')
             return
 
-        db = SessionLocal()
-        
-        # Only process if URL not already visited
-        if response.url not in self.visited_links:
-            self.visited_links.add(response.url)
-            
-            # Extract and save page data
-            title = response.css('title::text').get()
-            body_text = ' '.join(response.css('body *::text').getall()).strip()
-            html_content = response.text
-            # Extract favicon URL from <link rel="icon" href="...">
-            favicon_url = response.css("link[rel~='icon']::attr(href)").get()
-            if favicon_url:
-                favicon_url = urljoin(response.url, favicon_url)
+        # Use context manager to ensure session is closed after use
+        with SessionLocal() as db:
+            # Only process if URL not already visited
+            if response.url not in self.visited_links:
+                self.visited_links.add(response.url)
                 
-            else:
-                # If not found, check for default /favicon.ico
-                favicon_url = urljoin(response.url, "/favicon.ico")
-                
-            if self.link_count < self.max_links:
-                website_data = schemas.WebsiteDataCreate(
-                    website_url=response.url,
-                    title=title,
-                    text=body_text,
-                    html=html_content,
-                    status=True,
-                    crawl_session_id=self.crawl_session.id,
-                    favicon_url=favicon_url
-                )
-                try:
-                    cruds.create_website_data(db=db, website_data=website_data)
-                    self.link_count += 1
-                    self.logger.info(f"Saved content for URL: {response.url}. Links processed: {self.link_count}/{self.max_links}")
+                # Extract and save page data
+                title = response.css('title::text').get()
+                body_text = self.extract_text_content(response)
+                html_content = response.text
+                # Extract favicon URL from <link rel="icon" href="...">
+                favicon_url = self.extract_favicon(response)
                     
-                    # Update crawl session link count
-                    cruds.update_crawl_session(
-                        db, 
-                        self.crawl_id,
-                        schemas.CrawlSessionUpdate(link_count=self.link_count)
+                if self.link_count < self.max_links:
+                    website_data = schemas.WebsiteDataCreate(
+                        website_url=response.url,
+                        title=title,
+                        text=body_text,
+                        html=html_content,
+                        status=True,
+                        crawl_session_id=self.crawl_session.id,
+                        favicon_url=favicon_url
                     )
-                    
-                    # If max links reached after saving, close spider
-                    if self.link_count >= self.max_links:
-                        self.logger.info("Max links reached after saving. Closing spider.")
-                        self.crawler.engine.close_spider(self, 'finished')
-                        return
-                except Exception as e:
-                    self.logger.error(f"Error saving content: {e}")
+                    try:
+                        cruds.create_website_data(db=db, website_data=website_data)
+                        self.link_count += 1
+                        self.logger.info(f"Saved content for URL: {response.url}. Links processed: {self.link_count}/{self.max_links}")
+                        
+                        # Update crawl session link count
+                        cruds.update_crawl_session(
+                            db, 
+                            self.crawl_id,
+                            schemas.CrawlSessionUpdate(link_count=self.link_count)
+                        )
+                        
+                        # If max links reached after saving, close spider
+                        if self.link_count >= self.max_links:
+                            self.logger.info("Max links reached after saving. Closing spider.")
+                            self.crawler.engine.close_spider(self, 'finished')
+                            return
+                    except Exception as e:
+                        self.logger.error(f"Error saving content: {e}")
 
-            # Extract and queue new links if under max_links
-            if self.link_count < self.max_links:
-                for next_page in response.css('a::attr(href)').getall():
-                    next_page_url = response.urljoin(next_page)
-                    if (next_page_url not in self.visited_links and 
-                        next_page_url not in self.pending_urls):
-                        self.pending_urls.append(next_page_url)
-                        yield scrapy.Request(next_page_url, callback=self.parse)
+                # Extract and queue new links if under max_links
+                if self.link_count < self.max_links:
+                    for next_page in response.css('a::attr(href)').getall():
+                        next_page_url = response.urljoin(next_page)
+                        # Only follow URLs with HTTP or HTTPS schemes
+                        if next_page_url.startswith("http"):
+                            if (next_page_url not in self.visited_links and 
+                                next_page_url not in self.pending_urls):
+                                self.pending_urls.append(next_page_url)
+                                yield scrapy.Request(next_page_url, callback=self.parse)
 
-        db.close()
-        self.save_state()
+            self.save_state()
 
     def save_state(self):
         # Save the current state to the database

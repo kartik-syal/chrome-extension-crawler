@@ -55,7 +55,8 @@ ROBOTSTXT_OBEY = True
 #}
 DOWNLOADER_MIDDLEWARES = {
     'web_scraper.spiders.web_spider.StopSpiderMiddleware': 543,
-    'web_scraper.middlewares.ExcludeFileTypesMiddleware': 543
+    'web_scraper.middlewares.ExcludeFileTypesMiddleware': 544,
+    'web_scraper.middlewares.ExcludeLargeFilesMiddleware': 545,
 }
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
@@ -94,4 +95,5 @@ DOWNLOADER_MIDDLEWARES = {
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
-DOWNLOAD_MAXSIZE = 100 * 1024 * 1024  # 100 MB
+DOWNLOAD_MAXSIZE = 10 * 1024 * 1024  # 10 MB
+DOWNLOAD_TIMEOUT = 10

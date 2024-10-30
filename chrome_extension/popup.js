@@ -114,14 +114,28 @@ document.addEventListener("DOMContentLoaded", async function () {
             delay: delay
         };
 
-        await fetch(`${API_URL}/crawl-url/`, {
+        const response = await fetch(`${API_URL}/crawl-url/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody)
         });
-
-        toggleView("crawlListContainer", "newCrawlContainer");
-        displayCrawls();
+    
+        if (response.ok) {
+            const result = await response.json();
+    
+            // Check for the custom header 'user-uuid-update'
+            const updatedUUID = response.headers.get("user-uuid-update");
+            if (updatedUUID) {
+                // Update the userUUID in Chrome storage
+                chrome.storage.local.set({ userUUID: updatedUUID });
+            }
+    
+            // Proceed with displaying crawls after creation
+            toggleView("crawlListContainer", "newCrawlContainer");
+            displayCrawls();
+        } else {
+            console.error("Failed to create crawl:", response.statusText);
+        }
     }
 
     function toggleModeAvailability() {

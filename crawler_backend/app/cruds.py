@@ -80,6 +80,10 @@ def update_crawl_session(db: Session, crawl_id: str, crawl_session_update: Crawl
         return db_crawl_session
     return None
 
+# Get a user by UUID
+def get_user(db: Session, user_uuid: str):
+    return db.query(UserData).filter(UserData.uuid == user_uuid).first()
+
 def create_user(db: Session):
     # Generate a new UUID
     user_uuid = str(uuid.uuid4())

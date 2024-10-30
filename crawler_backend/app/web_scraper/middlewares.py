@@ -110,3 +110,13 @@ class ExcludeFileTypesMiddleware:
     def process_request(self, request, spider):
         if any(request.url.endswith(ext) for ext in self.EXCLUDED_EXTENSIONS):
             raise IgnoreRequest(f"Excluded file type for URL: {request.url}")
+        
+class ExcludeLargeFilesMiddleware:
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+    def process_response(self, request, response, spider):
+        content_length = int(response.headers.get('Content-Length', 0))
+        if content_length > self.MAX_FILE_SIZE:
+            spider.logger.warning(f"Skipped large file: {request.url} ({content_length} bytes)")
+            raise IgnoreRequest(f"File too large: {request.url}")
+        return response

@@ -1,6 +1,6 @@
 # app/main.py
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import subprocess
@@ -42,9 +42,21 @@ class DeleteCrawlSession(BaseModel):
     crawl_session_id: str
 
 @app.post("/crawl-url/")
-def crawl(scrapy_request: ScrapyRequest):
+async def crawl(scrapy_request: ScrapyRequest, request: Request):
     # Generate a unique identifier for this crawl session
     crawl_id = str(uuid4())
+
+    # Create a crawl session in the database
+    db = next(database.get_db())
+    user_exists = cruds.get_user(db, scrapy_request.user_id)
+
+    # If user doesn't exist, create a new user
+    if not user_exists:
+        new_user = cruds.create_user(db=db)
+        scrapy_request.user_id = new_user.uuid
+        headers = {"user-uuid-update": new_user.uuid}  # Set the header with the new UUID
+    else:
+        headers = {}
 
     # Prepare the request data
     request_data = {
@@ -58,8 +70,6 @@ def crawl(scrapy_request: ScrapyRequest):
         "delay": scrapy_request.delay,
     }
 
-    # Create a crawl session in the database
-    db = next(database.get_db())
     print("url = ",scrapy_request.start_urls[0])
     favicon_url = get_favicon_url(scrapy_request.start_urls[0])
     crawl_session = schemas.CrawlSessionCreate(
@@ -95,7 +105,7 @@ def crawl(scrapy_request: ScrapyRequest):
     cruds.update_crawl_session(db, crawl_id, schemas.CrawlSessionUpdate(pid=pid))
     db.close()
 
-    return {"message": "Crawling started", "crawl_id": crawl_id}
+    return JSONResponse(content={"message": "Crawling started", "crawl_id": crawl_id}, headers=headers)
 
 @app.post("/pause-crawl/")
 def pause_crawl(request: CrawlControlRequest):
@@ -205,18 +215,18 @@ def get_favicon_url(page_url):
         # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Look for favicon link tags in common formats
-        icon_link = soup.find("link", rel="icon") or soup.find("link", rel="shortcut icon")
+        favicon_urls = [
+            urljoin(page_url, '/favicon.ico'),
+            soup.find("link", rel="icon"),
+            soup.find("link", rel="shortcut icon")
+        ]
 
-        # If a favicon link is found, build its absolute URL
-        if icon_link and 'href' in icon_link.attrs:
-            print("going to get favicon url 111")
-            favicon_url = urljoin(page_url, icon_link['href'])
-            return favicon_url
-        else:
-            print("going to get favicon url 222")
-            # Fallback: Assume default location for favicon (domain root)
-            return urljoin(page_url, '/favicon.ico')
+        for icon_link in favicon_urls[1:]:
+            if icon_link and 'href' in icon_link.attrs:
+                return urljoin(page_url, icon_link['href'])
+                
+        # Fallback to default favicon location if none found
+        return favicon_urls[0]
     
     except requests.RequestException as e:
         print("Error fetching page:", e)
