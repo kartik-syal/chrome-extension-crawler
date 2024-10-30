@@ -5,7 +5,7 @@ from app import cruds, schemas
 import pickle
 from scrapy import signals
 import logging
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 class WebSpider(scrapy.Spider):
@@ -77,21 +77,21 @@ class WebSpider(scrapy.Spider):
         return None
 
     def start_requests(self):
+        # Ensure base_netloc is set from the first start_url domain
+        self.base_netloc = urlparse(self.pending_urls[0]).netloc if self.pending_urls else None
+
         # Start from the remaining pending URLs
         for url in self.pending_urls:
             if self.link_count < self.max_links and self.should_continue:
                 yield scrapy.Request(url, callback=self.parse)
 
     def parse(self, response):
-        # Check if max links reached before processing
         if self.link_count >= self.max_links:
             self.logger.info(f"Max links ({self.max_links}) reached. Stopping crawler.")
             self.crawler.engine.close_spider(self, 'finished')
             return
 
-        # Use context manager to ensure session is closed after use
         with SessionLocal() as db:
-            # Only process if URL not already visited
             if response.url not in self.visited_links:
                 self.visited_links.add(response.url)
                 
@@ -99,9 +99,8 @@ class WebSpider(scrapy.Spider):
                 title = response.css('title::text').get()
                 body_text = self.extract_text_content(response)
                 html_content = response.text
-                # Extract favicon URL from <link rel="icon" href="...">
                 favicon_url = self.extract_favicon(response)
-                    
+
                 if self.link_count < self.max_links:
                     website_data = schemas.WebsiteDataCreate(
                         website_url=response.url,
@@ -117,14 +116,12 @@ class WebSpider(scrapy.Spider):
                         self.link_count += 1
                         self.logger.info(f"Saved content for URL: {response.url}. Links processed: {self.link_count}/{self.max_links}")
                         
-                        # Update crawl session link count
                         cruds.update_crawl_session(
                             db, 
                             self.crawl_id,
                             schemas.CrawlSessionUpdate(link_count=self.link_count)
                         )
-                        
-                        # If max links reached after saving, close spider
+
                         if self.link_count >= self.max_links:
                             self.logger.info("Max links reached after saving. Closing spider.")
                             self.crawler.engine.close_spider(self, 'finished')
@@ -132,18 +129,21 @@ class WebSpider(scrapy.Spider):
                     except Exception as e:
                         self.logger.error(f"Error saving content: {e}")
 
-                # Extract and queue new links if under max_links
                 if self.link_count < self.max_links:
                     for next_page in response.css('a::attr(href)').getall():
                         next_page_url = response.urljoin(next_page)
-                        # Only follow URLs with HTTP or HTTPS schemes
-                        if next_page_url.startswith("http"):
-                            if (next_page_url not in self.visited_links and 
-                                next_page_url not in self.pending_urls):
-                                self.pending_urls.append(next_page_url)
-                                yield scrapy.Request(next_page_url, callback=self.parse)
+                        next_page_netloc = urlparse(next_page_url).netloc
+                        
+                        # Only follow URLs with HTTP or HTTPS schemes and obey follow_external setting
+                        if next_page_url.startswith(("http://", "https://")):
+                            if next_page_url not in self.visited_links and next_page_url not in self.pending_urls:
+                                if self.follow_external or next_page_netloc == self.base_netloc:
+                                    self.pending_urls.append(next_page_url)
+                                    yield scrapy.Request(next_page_url, callback=self.parse)
+                                else:
+                                    print("false ",next_page_netloc,self.base_netloc)
 
-            self.save_state()
+        self.save_state()
 
     def save_state(self):
         # Save the current state to the database
