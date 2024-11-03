@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, PickleT
 from datetime import datetime
 from app.database import Base
 from sqlalchemy.orm import relationship
+from app.database import create_tables
 
 # Define a new model to store website crawling data
 class WebsiteData(Base):
@@ -44,6 +45,8 @@ class CrawlSession(Base):
     concurrent_requests = Column(Integer, nullable=True)
     delay = Column(Float, nullable=True)
     user_id = Column(String, ForeignKey('user_data.uuid'), index=True)  # Foreign key reference
+    child_only_pages = Column(Boolean, nullable=True, default=False)
+    search_strategy = Column(String, nullable=True, default='bfs')
 
     # Relationship to access CrawlSession from WebsiteData
     user = relationship("UserData", back_populates="user_data")
@@ -57,3 +60,4 @@ class UserData(Base):
     # Relationship to access CrawlSession from WebsiteData
     user_data = relationship("CrawlSession", back_populates="user", cascade="all, delete-orphan")
     
+create_tables()

@@ -31,6 +31,8 @@ class ScrapyRequest(BaseModel):
     concurrent_requests: int = 16
     delay: float = 0.0  # Delay for content crawling
     user_id: str
+    child_only_pages: bool = False
+    search_strategy: str = 'bfs'
     
 class CrawlControlRequest(BaseModel):
     crawl_id: str
@@ -68,6 +70,8 @@ async def crawl(scrapy_request: ScrapyRequest, request: Request):
         "depth_limit": scrapy_request.depth_limit,
         "concurrent_requests": scrapy_request.concurrent_requests,
         "delay": scrapy_request.delay,
+        "child_only_pages":scrapy_request.child_only_pages,
+        "search_strategy": scrapy_request.search_strategy
     }
 
     print("url = ",scrapy_request.start_urls[0])

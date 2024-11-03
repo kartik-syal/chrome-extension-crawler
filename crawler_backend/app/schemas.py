@@ -67,6 +67,8 @@ class CrawlSessionCreate(BaseModel):
     concurrent_requests: int
     delay: float
     favicon_url: str
+    search_strategy: str
+    child_only_pages: bool
 
 class CrawlSessionUpdate(BaseModel):
     status: Optional[str] = None

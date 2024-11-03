@@ -7,7 +7,8 @@ from scrapy import signals
 import logging
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
-import os,re
+import os
+import re
 from scrapy.spiders import CrawlSpider, Rule
 from scrapy.linkextractors import LinkExtractor
 
@@ -15,7 +16,7 @@ class WebSpider(CrawlSpider):
     name = 'web_spider'
 
     def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2,
-                 concurrent_requests=16, restrict_path=False, levels_above=0, *args, **kwargs):
+                 concurrent_requests=16, child_only_pages=False, search_strategy='dfs', *args, **kwargs):
         super(WebSpider, self).__init__(*args, **kwargs)
         self.crawl_id = crawl_id
         self.max_links = int(max_links)
@@ -25,14 +26,13 @@ class WebSpider(CrawlSpider):
         self.follow_external = follow_external
         self.depth_limit = int(depth_limit)
         self.concurrent_requests = int(concurrent_requests)
-        self.restrict_path = restrict_path
-        self.levels_above = int(levels_above)
-
+        self.child_only_pages = child_only_pages
+        self.search_strategy = search_strategy.lower()  # Set the search strategy
 
         # Set the full base URL to filter by domain and path
         if start_urls:
             print(start_urls[0])
-            self.base_url,self.domain = self.remove_extension_from_url(start_urls[0])
+            self.base_url, self.domain = self.remove_extension_from_url(start_urls[0])
             self.base_path = self.base_url
             # Create a regex for the base path
             self.path_regex = self.create_path_regex(self.base_path)
@@ -41,10 +41,10 @@ class WebSpider(CrawlSpider):
             self.base_url = None
             self.path_regex = None
 
-        print("basics domain=> ", self.domain)
-        print("base path => ", self.base_path)
-        print("path regex =>", self.path_regex)
-        print("self.base_url => ", self.base_url)
+        print("basics domain=>", self.domain)
+        print("base path =>", self.base_path)
+        print(f"path regex =>{self.path_regex}")
+        print("self.base_url =>", self.base_url)
 
         # Custom settings
         self.custom_settings = {
@@ -59,15 +59,18 @@ class WebSpider(CrawlSpider):
         # Flag to control crawling state
         self.should_continue = True
 
-        if self.restrict_path:
+        if self.child_only_pages:
+            # Allow all URLs starting with the base path without explicitly including file extensions
             self.rules = (
-                Rule(LinkExtractor(allow=self.path_regex if self.path_regex else None, allow_domains=self.domain), callback='parse_item', follow=True),
+                Rule(
+                    LinkExtractor(allow=(self.path_regex,), allow_domains=self.domain),
+                    callback='parse_item',
+                    follow=True
+                ),
             )
-
             self._compile_rules()
 
-
-    def remove_extension_from_url(self,url):
+    def remove_extension_from_url(self, url):
         # Parse the URL
         parsed_url = urlparse(url)
         
@@ -125,26 +128,33 @@ class WebSpider(CrawlSpider):
                 return response.urljoin(url)
         return None
     
-    def create_path_regex(self, path):
-        """ Create a regex to restrict the crawling to specific path levels. """
-        path_components = path.split('/')
-        path_components = [c for c in path_components if c]  # Remove empty components
+    def create_path_regex(self, base_url):
+        path_regex = rf"^{base_url}"
 
-        # Allow levels_above number of parent directories
-        for _ in range(self.levels_above):
-            if path_components:
-                path_components.pop()
-
-        # Create a regex pattern
-        path_regex = '\/'.join([re.escape(p) for p in path_components]) + '.*'
         return path_regex
 
     def start_requests(self):
-
         # Start from the remaining pending URLs
-        for url in self.pending_urls:
-            if self.link_count < self.max_links and self.should_continue:
-                yield scrapy.Request(url, callback=self.parse)
+        if self.search_strategy == 'bfs':
+            # BFS: Use a queue to manage pending URLs
+            self.queue = self.pending_urls.copy()
+            self.pending_urls = []  # Clear the list as we will use the queue
+
+            while self.queue:
+                url = self.queue.pop(0)  # Get the next URL
+                if self.link_count < self.max_links and self.should_continue:
+                    if re.match(self.path_regex, url):
+                        yield scrapy.Request(url, self.parse)
+        elif self.search_strategy == 'dfs':
+            # DFS: Use a stack to manage pending URLs
+            self.stack = self.pending_urls.copy()
+            self.pending_urls = []  # Clear the list as we will use the stack
+
+            while self.stack:
+                url = self.stack.pop()  # Get the next URL
+                if self.link_count < self.max_links and self.should_continue:
+                    if re.match(self.path_regex, url):
+                        yield scrapy.Request(url, self.parse)
 
     def parse(self, response):
         if self.link_count >= self.max_links:
@@ -196,16 +206,21 @@ class WebSpider(CrawlSpider):
 
                         # Check if URL is within the allowed base URL
                         if next_page_url.startswith(self.base_url):
-                            # if not self.restrict_path and re.match(self.path_regex, urlparse(next_page_url).path):
-                            #     self.logger.info(f"Skipping URL due to path restriction: {next_page_url}")
-                            #     continue  # Skip URLs that don't match the path regex
+                            if self.child_only_pages and not re.match(self.path_regex, next_page_url):
+                                self.logger.info(f"Skipping URL due to path restriction: {next_page_url} {re.match(self.path_regex, next_page_url)} {self.child_only_pages}")
+                                continue
 
                             if next_page_url not in self.visited_links and next_page_url not in self.pending_urls:
                                 if self.follow_external or next_page_netloc == self.domain:
-                                    self.pending_urls.append(next_page_url)
+                                    # Add next page URL to the appropriate collection
+                                    if self.search_strategy == 'bfs':
+                                        self.queue.append(next_page_url)  # Use queue for BFS
+                                    elif self.search_strategy == 'dfs':
+                                        self.stack.append(next_page_url)  # Use stack for DFS
+
                                     yield scrapy.Request(next_page_url, callback=self.parse)
                                 else:
-                                    print("skipping external link :::: ",next_page_netloc)
+                                    print("Skipping external link: ", next_page_netloc)
 
         self.save_state()
 
