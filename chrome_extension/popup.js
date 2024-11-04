@@ -62,6 +62,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                         ${crawl.crawl_name}
                     </td>
                     <td class="${statusClass}">${crawl.status}</td>
+                    <td>${crawl.link_count}</td>
                     <td>
                         ${crawl.status === "completed" ? "" : `
                             <i class="${crawl.status === 'paused' ? 'fas fa-play' : 'fas fa-pause'} action-icon toggle-status" 

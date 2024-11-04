@@ -191,7 +191,8 @@ def get_user_crawl_sessions(get_crawl: GetAllCrawls):
             "crawl_name": session.crawl_name,
             "status": session.status,
             "created_at": session.created_at,
-            "favicon": session.favicon_url
+            "favicon": session.favicon_url,
+            "link_count": session.link_count
         }
         for session in crawl_sessions
     ]
