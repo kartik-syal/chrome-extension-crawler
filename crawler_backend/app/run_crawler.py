@@ -34,6 +34,7 @@ def main():
             depth_limit=request_data.get('depth_limit', 2),
             delay=request_data.get('delay', 0.1),
             concurrent_requests=request_data.get('concurrent_requests', 16),
+            only_child_pages=request_data.get('only_child_pages', False),
             results=[]
         )
     else:

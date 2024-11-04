@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 class WebSpider(scrapy.Spider):
     name = 'web_spider'
 
-    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, *args, **kwargs):
+    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, only_child_pages=False, *args, **kwargs):
         super(WebSpider, self).__init__(*args, **kwargs)
         self.crawl_id = crawl_id
         self.max_links = int(max_links)
@@ -21,6 +21,20 @@ class WebSpider(scrapy.Spider):
         self.follow_external = follow_external
         self.depth_limit = int(depth_limit)
         self.concurrent_requests = int(concurrent_requests)
+        self.only_child_pages = only_child_pages
+
+        # Set base path for child-only crawling
+        if self.only_child_pages and self.pending_urls:
+            parsed_url = urlparse(self.pending_urls[0])
+            self.base_path = parsed_url.path
+            # Remove file extension if present (like .html)
+            if '.' in self.base_path.split('/')[-1]:
+                self.base_path = '/'.join(self.base_path.split('/')[:-1])
+            # Ensure base path ends with /
+            if not self.base_path.endswith('/'):
+                self.base_path += '/'
+        else:
+            self.base_path = None
 
         # Custom settings
         self.custom_settings = {
@@ -85,6 +99,22 @@ class WebSpider(scrapy.Spider):
             if self.link_count < self.max_links and self.should_continue:
                 yield scrapy.Request(url, callback=self.parse)
 
+    def is_child_page(self, url):
+        """Check if the URL is a child page of the base URL"""
+        if not self.only_child_pages or not self.base_path:
+            return True
+            
+        parsed_url = urlparse(url)
+        url_path = parsed_url.path
+        
+        # Remove file extension if present
+        if '.' in url_path.split('/')[-1]:
+            url_path = '/'.join(url_path.split('/')[:-1]) + '/'
+        elif not url_path.endswith('/'):
+            url_path += '/'
+            
+        return url_path.startswith(self.base_path)
+
     def parse(self, response):
         if self.link_count >= self.max_links:
             self.logger.info(f"Max links ({self.max_links}) reached. Stopping crawler.")
@@ -137,11 +167,9 @@ class WebSpider(scrapy.Spider):
                         # Only follow URLs with HTTP or HTTPS schemes and obey follow_external setting
                         if next_page_url.startswith(("http://", "https://")):
                             if next_page_url not in self.visited_links and next_page_url not in self.pending_urls:
-                                if self.follow_external or next_page_netloc == self.base_netloc:
+                                if (self.follow_external or next_page_netloc == self.base_netloc) and self.is_child_page(next_page_url):
                                     self.pending_urls.append(next_page_url)
                                     yield scrapy.Request(next_page_url, callback=self.parse)
-                                else:
-                                    print("false ",next_page_netloc,self.base_netloc)
 
         self.save_state()
 

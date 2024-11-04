@@ -31,6 +31,7 @@ class ScrapyRequest(BaseModel):
     concurrent_requests: int = 16
     delay: float = 0.0  # Delay for content crawling
     user_id: str
+    only_child_pages: bool = False
     
 class CrawlControlRequest(BaseModel):
     crawl_id: str
@@ -68,6 +69,7 @@ async def crawl(scrapy_request: ScrapyRequest, request: Request):
         "depth_limit": scrapy_request.depth_limit,
         "concurrent_requests": scrapy_request.concurrent_requests,
         "delay": scrapy_request.delay,
+        "only_child_pages": scrapy_request.only_child_pages,
     }
 
     print("url = ",scrapy_request.start_urls[0])
@@ -84,6 +86,7 @@ async def crawl(scrapy_request: ScrapyRequest, request: Request):
         depth_limit=scrapy_request.depth_limit,
         concurrent_requests=scrapy_request.concurrent_requests,
         delay=scrapy_request.delay,
+        only_child_pages=scrapy_request.only_child_pages,
         favicon_url=favicon_url
     )
     cruds.create_crawl_session(db, crawl_session)

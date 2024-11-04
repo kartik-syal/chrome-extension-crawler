@@ -102,6 +102,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         const followExternal = document.getElementById("followExternal").checked;
         const concurrency = parseInt(document.getElementById("concurrency").value);
         const delay = parseFloat(document.getElementById("delay").value);
+        const onlyChildPages = document.getElementById("onlyChildPages").checked;
 
         const requestBody = {
             user_id: uuid,
@@ -111,7 +112,8 @@ document.addEventListener("DOMContentLoaded", async function () {
             follow_external: followExternal,
             depth_limit: crawlDepth,
             concurrent_requests: concurrency,
-            delay: delay
+            delay: delay,
+            only_child_pages: onlyChildPages
         };
 
         const response = await fetch(`${API_URL}/crawl-url/`, {
