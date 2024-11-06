@@ -74,7 +74,8 @@ async function clientCrawler(crawlConfig) {
     let visited = new Set();
     let linkCount = 0;
 
-    queue.push({ url: start_urls[0], depth: 0 });
+    // Initialize the queue with the start URLs
+    start_urls.forEach(url => queue.push({ url, depth: 0 }));
 
     const baseUrl = new URL(start_urls[0]);
     const baseDomain = baseUrl.hostname;
@@ -94,6 +95,7 @@ async function clientCrawler(crawlConfig) {
         const current = queue.shift();
         const { url, depth } = current;
 
+        // Skip the URL if already visited or depth exceeds limit
         if (visited.has(url) || depth > depth_limit) {
             continue;
         }
@@ -104,7 +106,7 @@ async function clientCrawler(crawlConfig) {
             const response = await fetch(url, { credentials: 'omit' });
             const contentType = response.headers.get('Content-Type');
             if (!contentType || !contentType.includes('text/html')) {
-                continue;
+                continue;  // Only process HTML content
             }
             const html = await response.text();
 
@@ -131,6 +133,17 @@ async function clientCrawler(crawlConfig) {
 
             linkCount++;
 
+            // Update crawl session status to 'completed' in backend
+            await fetch(`${API_URL}/update-crawl-session/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    crawl_id: String(crawl_id),
+                    link_count: linkCount
+                })
+            });
+
+            // Crawl links found in the current page (child links)
             for (const link of links) {
                 const linkUrl = new URL(link);
 
@@ -152,6 +165,7 @@ async function clientCrawler(crawlConfig) {
                     }
                 }
 
+                // If the link is not visited, add it to the queue for further crawling
                 if (!visited.has(link)) {
                     queue.push({ url: link, depth: depth + 1 });
                 }
@@ -161,6 +175,7 @@ async function clientCrawler(crawlConfig) {
             if (delay > 0) {
                 await new Promise(resolve => setTimeout(resolve, delay * 1000));
             }
+
         } catch (error) {
             console.error(`Error fetching ${url}: ${error}`);
         }
@@ -171,8 +186,8 @@ async function clientCrawler(crawlConfig) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            crawl_id: crawl_id,
-            update_fields: { status: 'completed', link_count: linkCount }
+            crawl_id: String(crawl_id),
+            status: 'completed'
         })
     });
 

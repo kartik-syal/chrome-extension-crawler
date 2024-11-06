@@ -72,11 +72,21 @@ def create_crawl_session(db: Session, crawl_session: CrawlSessionCreate):
     return db_crawl_session
 
 def update_crawl_session(db: Session, crawl_id: str, crawl_session_update: CrawlSessionUpdate):
-    db_crawl_session = db.query(CrawlSession).filter(CrawlSession.crawl_id == crawl_id).first()
+    # Determine whether to use id or crawl_id for filtering
+    if crawl_id.isdigit():
+        db_crawl_session = db.query(CrawlSession).filter(CrawlSession.id == crawl_id).first()
+    else:
+        db_crawl_session = db.query(CrawlSession).filter(CrawlSession.crawl_id == crawl_id).first()
+    
     if db_crawl_session:
+        # Extract only fields that are set
         update_data = crawl_session_update.dict(exclude_unset=True)
+        update_data.pop('crawl_id', None)  # Remove crawl_id if present
+        
+        # Update only fields that are not None
         for key, value in update_data.items():
             setattr(db_crawl_session, key, value)
+        
         db.commit()
         db.refresh(db_crawl_session)
         return db_crawl_session

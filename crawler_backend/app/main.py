@@ -256,14 +256,17 @@ async def store_website_data(website_data: schemas.WebsiteDataCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/update-crawl-session/")
-async def update_crawl_session(update_request: schemas.CrawlSessionUpdateRequest):
+async def update_crawl_session(update_request: schemas.CrawlSessionUpdate):
     db = next(database.get_db())
     try:
-        cruds.update_crawl_session(db, update_request.crawl_id, update_request.update_fields)
-        db.close()
-        return {"message": "Crawl session updated"}
+        # Call the CRUD function with the update request directly
+        updated_session = cruds.update_crawl_session(db, update_request.crawl_id, update_request)
+        
+        if updated_session:
+            return {"message": "Crawl session updated"}
+        else:
+            raise HTTPException(status_code=404, detail="Crawl session not found")
     except Exception as e:
-        db.close()
         raise HTTPException(status_code=500, detail=str(e))
 
 def get_favicon_url(page_url):

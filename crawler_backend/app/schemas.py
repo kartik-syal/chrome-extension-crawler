@@ -71,15 +71,12 @@ class CrawlSessionCreate(BaseModel):
     crawl_location: str = 'server'  # Options: 'server', 'client'
 
 class CrawlSessionUpdate(BaseModel):
+    crawl_id: Optional[str] = None
     status: Optional[str] = None
     pid: Optional[int] = None
     request_queue: Optional[bytes] = None
     visited_links: Optional[bytes] = None
     link_count: Optional[int] = None
-
-class CrawlSessionUpdateRequest(BaseModel):
-    crawl_id: int
-    update_fields: CrawlSessionUpdate
 
 class UserCreate(BaseModel):
     pass
