@@ -2,7 +2,7 @@
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'parseHTML') {
-        const { html } = message;
+        const { html, url } = message;
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
@@ -14,7 +14,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             .map(a => a.href)
             .filter(href => href.startsWith('http'));
 
-        sendResponse({ title, text, links });
+        // Extract favicon URL
+        let faviconUrl = '';
+        const faviconElement = doc.querySelector('link[rel="icon"], link[rel="shortcut icon"]');
+        if (faviconElement) {
+            faviconUrl = faviconElement.getAttribute('href');
+        }
+
+        // Resolve relative favicon URL
+        if (faviconUrl && !faviconUrl.startsWith('http')) {
+            // If the favicon is relative, resolve it using the page's origin
+            const baseUrl = new URL(url).origin;
+            faviconUrl = new URL(faviconUrl, baseUrl).href;
+        }
+
+        // Send parsed data back to the client
+        sendResponse({ title, text, links, faviconUrl });
     }
-    return true; // Indicates that the response is sent asynchronously
+    return true; // Indicates asynchronous response
 });

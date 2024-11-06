@@ -242,31 +242,33 @@ async def create_crawl_session(scrapy_request: ScrapyRequest, request: Request):
     db_crawl = cruds.create_crawl_session(db, crawl_session)
     db.close()
 
-    return JSONResponse(content={"message": "Crawl session created", "crawl_id": db_crawl.id}, headers=headers)
+    return JSONResponse(content={"message": "Crawl session created", "crawl_id": crawl_id, "crawl_session_id":db_crawl.id}, headers=headers)
 
 @app.post("/store-website-data/")
-async def store_website_data(website_data: schemas.WebsiteDataCreate):
-    db = next(database.get_db())
+async def store_and_update(request: schemas.CombinedRequest):
+    db: Session = next(database.get_db())
     try:
-        cruds.create_website_data(db, website_data)
-        db.close()
-        return {"message": "Website data stored"}
-    except Exception as e:
-        db.close()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/update-crawl-session/")
-async def update_crawl_session(update_request: schemas.CrawlSessionUpdate):
-    db = next(database.get_db())
-    try:
-        # Call the CRUD function with the update request directly
-        updated_session = cruds.update_crawl_session(db, update_request.crawl_id, update_request)
+        if request.website_data:
+            # Store website data
+            cruds.create_website_data(db, request.website_data)
         
-        if updated_session:
-            return {"message": "Crawl session updated"}
-        else:
-            raise HTTPException(status_code=404, detail="Crawl session not found")
+        if request.crawl_session_update:
+            # Update crawl session
+            updated_session = cruds.update_crawl_session(
+                db, 
+                request.crawl_session_update.crawl_id, 
+                request.crawl_session_update
+            )
+            if not updated_session:
+                raise HTTPException(status_code=404, detail="Crawl session not found")
+
+        if not request.website_data and not request.crawl_session_update:
+            raise HTTPException(status_code=400, detail="At least one of 'website_data' or 'crawl_session_update' must be provided")
+
+        return {"message": "Request processed successfully"}
+    
     except Exception as e:
+        db.close()
         raise HTTPException(status_code=500, detail=str(e))
 
 def get_favicon_url(page_url):

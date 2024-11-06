@@ -73,10 +73,7 @@ def create_crawl_session(db: Session, crawl_session: CrawlSessionCreate):
 
 def update_crawl_session(db: Session, crawl_id: str, crawl_session_update: CrawlSessionUpdate):
     # Determine whether to use id or crawl_id for filtering
-    if crawl_id.isdigit():
-        db_crawl_session = db.query(CrawlSession).filter(CrawlSession.id == crawl_id).first()
-    else:
-        db_crawl_session = db.query(CrawlSession).filter(CrawlSession.crawl_id == crawl_id).first()
+    db_crawl_session = db.query(CrawlSession).filter(CrawlSession.crawl_id == crawl_id).first()
     
     if db_crawl_session:
         # Extract only fields that are set

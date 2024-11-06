@@ -36,6 +36,7 @@ async function startClientCrawl(crawlConfig) {
 
         // Start crawling process
         crawlConfig.crawl_id = crawlId;
+        crawlConfig.crawl_session_id = result.crawl_session_id;
         clientCrawler(crawlConfig);
     } else {
         console.error('Failed to create crawl session:', response.statusText);
@@ -67,7 +68,8 @@ async function clientCrawler(crawlConfig) {
         depth_limit,
         concurrent_requests,
         delay,
-        only_child_pages
+        only_child_pages,
+        crawl_session_id
     } = crawlConfig;
 
     let queue = [];
@@ -111,8 +113,8 @@ async function clientCrawler(crawlConfig) {
             const html = await response.text();
 
             // Parse HTML in the offscreen document
-            const parsedData = await parseHTMLInOffscreen(html);
-            const { title, text, links } = parsedData;
+            const parsedData = await parseHTMLInOffscreen(html, url);
+            const { title, text, links, faviconUrl } = parsedData;
 
             // Send data to backend
             const websiteData = {
@@ -121,26 +123,34 @@ async function clientCrawler(crawlConfig) {
                 text: text,
                 html: html,
                 status: true,
-                crawl_session_id: crawl_id,
-                favicon_url: '' // You can extract favicon if needed
+                crawl_session_id: crawl_session_id,
+                favicon_url: faviconUrl 
+            };
+            
+            linkCount++;
+
+            // the combined request body
+            const combinedRequest = {
+                website_data: websiteData,  
+                crawl_session_update: {
+                    crawl_id: crawl_id,
+                    link_count: linkCount
+                }
             };
 
+            // Send the store-data request to your backend API
             await fetch(`${API_URL}/store-website-data/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(websiteData)
-            });
-
-            linkCount++;
-
-            // Update crawl session status to 'completed' in backend
-            await fetch(`${API_URL}/update-crawl-session/`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    crawl_id: String(crawl_id),
-                    link_count: linkCount
-                })
+                body: JSON.stringify(combinedRequest)
+            }).then(response => {
+                if (response.ok) {
+                    console.log("Data stored and crawl session updated successfully");
+                } else {
+                    console.error("Error while processing the request:", response);
+                }
+            }).catch(error => {
+                console.error("Request failed:", error);
             });
 
             // Crawl links found in the current page (child links)
@@ -182,12 +192,14 @@ async function clientCrawler(crawlConfig) {
     }
 
     // Update crawl session status to 'completed' in backend
-    await fetch(`${API_URL}/update-crawl-session/`, {
+    await fetch(`${API_URL}/store-website-data/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            crawl_id: String(crawl_id),
-            status: 'completed'
+            crawl_session_update: {
+            crawl_id: crawl_id,
+            status: "completed"
+            }
         })
     });
 
@@ -197,9 +209,9 @@ async function clientCrawler(crawlConfig) {
     await chrome.offscreen.closeDocument();
 }
 
-async function parseHTMLInOffscreen(html) {
+async function parseHTMLInOffscreen(html, url) {
     return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({ action: 'parseHTML', html }, (response) => {
+        chrome.runtime.sendMessage({ action: 'parseHTML', html, url }, (response) => {
             if (chrome.runtime.lastError) {
                 console.error(chrome.runtime.lastError);
                 reject(chrome.runtime.lastError);

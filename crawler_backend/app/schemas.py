@@ -100,3 +100,7 @@ class UserDataResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class CombinedRequest(BaseModel):
+    website_data: Optional[WebsiteDataCreate] = None
+    crawl_session_update: Optional[CrawlSessionUpdate] = None
