@@ -209,6 +209,63 @@ def delete_crawl_session(delete_crawl_session: DeleteCrawlSession):
         raise HTTPException(status_code=404, detail="Crawl session not found")
     return {"success": True, "message": "session deleted successfully."}
 
+@app.post("/create-crawl-session/")
+async def create_crawl_session(scrapy_request: ScrapyRequest, request: Request):
+    crawl_id = str(uuid4())
+    db = next(database.get_db())
+    user_exists = cruds.get_user(db, scrapy_request.user_id)
+
+    if not user_exists:
+        new_user = cruds.create_user(db=db)
+        scrapy_request.user_id = new_user.uuid
+        headers = {"user-uuid-update": new_user.uuid}
+    else:
+        headers = {}
+
+    favicon_url = get_favicon_url(scrapy_request.start_urls[0])
+    crawl_session = schemas.CrawlSessionCreate(
+        user_id=scrapy_request.user_id,
+        crawl_id=crawl_id,
+        crawl_name=scrapy_request.crawl_name,
+        spider_name='web_spider',
+        crawl_type='url_crawl',
+        start_urls=scrapy_request.start_urls,
+        max_links=scrapy_request.max_links,
+        follow_external=scrapy_request.follow_external,
+        depth_limit=scrapy_request.depth_limit,
+        concurrent_requests=scrapy_request.concurrent_requests,
+        delay=scrapy_request.delay,
+        only_child_pages=scrapy_request.only_child_pages,
+        favicon_url=favicon_url,
+        crawl_location='client'  # Indicate client-side crawl
+    )
+    db_crawl = cruds.create_crawl_session(db, crawl_session)
+    db.close()
+
+    return JSONResponse(content={"message": "Crawl session created", "crawl_id": db_crawl.id}, headers=headers)
+
+@app.post("/store-website-data/")
+async def store_website_data(website_data: schemas.WebsiteDataCreate):
+    db = next(database.get_db())
+    try:
+        cruds.create_website_data(db, website_data)
+        db.close()
+        return {"message": "Website data stored"}
+    except Exception as e:
+        db.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-crawl-session/")
+async def update_crawl_session(update_request: schemas.CrawlSessionUpdateRequest):
+    db = next(database.get_db())
+    try:
+        cruds.update_crawl_session(db, update_request.crawl_id, update_request.update_fields)
+        db.close()
+        return {"message": "Crawl session updated"}
+    except Exception as e:
+        db.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
 def get_favicon_url(page_url):
     try:
         print("going to get favicon url")

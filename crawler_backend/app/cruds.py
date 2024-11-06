@@ -63,7 +63,8 @@ def create_crawl_session(db: Session, crawl_session: CrawlSessionCreate):
         concurrent_requests=crawl_session.concurrent_requests,
         delay=crawl_session.delay,
         only_child_pages=crawl_session.only_child_pages,
-        favicon_url=crawl_session.favicon_url
+        favicon_url=crawl_session.favicon_url,
+        crawl_location=crawl_session.crawl_location
     )
     db.add(db_crawl_session)
     db.commit()

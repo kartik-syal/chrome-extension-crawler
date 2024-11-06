@@ -85,11 +85,6 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     async function createNewCrawl(event) {
         event.preventDefault();
-        if (document.getElementById("modeToggle").checked) {
-            alert("Client mode is currently unavailable. Please switch back to Server mode.");
-            return;
-        }
-
         const uuid = await getUserUUID();
         if (!uuid) {
             console.error("Failed to create crawl due to missing user ID.");
@@ -117,36 +112,41 @@ document.addEventListener("DOMContentLoaded", async function () {
             only_child_pages: onlyChildPages
         };
 
-        const response = await fetch(`${API_URL}/crawl-url/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(requestBody)
-        });
-    
-        if (response.ok) {
-            const result = await response.json();
-    
-            // Check for the custom header 'user-uuid-update'
-            const updatedUUID = response.headers.get("user-uuid-update");
-            if (updatedUUID) {
-                // Update the userUUID in Chrome storage
-                chrome.storage.local.set({ userUUID: updatedUUID });
-            }
-    
-            // Proceed with displaying crawls after creation
-            toggleView("crawlListContainer", "newCrawlContainer");
-            displayCrawls();
-        } else {
-            console.error("Failed to create crawl:", response.statusText);
-        }
-    }
-
-    function toggleModeAvailability() {
-        const modeUnavailableMessage = document.getElementById("modeUnavailable");
         if (document.getElementById("modeToggle").checked) {
-            modeUnavailableMessage.style.display = "block";
+            // Client-side crawling
+            chrome.runtime.sendMessage({ action: 'startClientCrawl', crawlConfig: requestBody }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error(chrome.runtime.lastError.message);
+                } else {
+                    console.log(response.message);
+                    toggleView("crawlListContainer", "newCrawlContainer");
+                    displayCrawls();
+                }
+            });
         } else {
-            modeUnavailableMessage.style.display = "none";
+            // Server-side crawling
+            const response = await fetch(`${API_URL}/crawl-url/`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(requestBody)
+            });
+        
+            if (response.ok) {
+                const result = await response.json();
+        
+                // Check for the custom header 'user-uuid-update'
+                const updatedUUID = response.headers.get("user-uuid-update");
+                if (updatedUUID) {
+                    // Update the userUUID in Chrome storage
+                    chrome.storage.local.set({ userUUID: updatedUUID });
+                }
+        
+                // Proceed with displaying crawls after creation
+                toggleView("crawlListContainer", "newCrawlContainer");
+                displayCrawls();
+            } else {
+                console.error("Failed to create crawl:", response.statusText);
+            }
         }
     }
 
@@ -190,7 +190,6 @@ document.addEventListener("DOMContentLoaded", async function () {
         toggleView("crawlListContainer", "newCrawlContainer");
     });
 
-    document.getElementById("modeToggle").addEventListener("change", toggleModeAvailability);
     document.getElementById("newCrawlForm").addEventListener("submit", createNewCrawl);
     displayCrawls();
 });

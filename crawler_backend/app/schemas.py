@@ -68,6 +68,7 @@ class CrawlSessionCreate(BaseModel):
     delay: float
     only_child_pages: bool = False
     favicon_url: str
+    crawl_location: str = 'server'  # Options: 'server', 'client'
 
 class CrawlSessionUpdate(BaseModel):
     status: Optional[str] = None
@@ -75,6 +76,10 @@ class CrawlSessionUpdate(BaseModel):
     request_queue: Optional[bytes] = None
     visited_links: Optional[bytes] = None
     link_count: Optional[int] = None
+
+class CrawlSessionUpdateRequest(BaseModel):
+    crawl_id: int
+    update_fields: CrawlSessionUpdate
 
 class UserCreate(BaseModel):
     pass

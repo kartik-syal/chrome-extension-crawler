@@ -49,6 +49,7 @@ class CrawlSession(Base):
     # Relationship to access CrawlSession from WebsiteData
     user = relationship("UserData", back_populates="user_data")
     favicon_url = Column(Text)
+    crawl_location = Column(String, default='server')  # Options: 'server' or 'client'
 
 
 class UserData(Base):
