@@ -61,159 +61,138 @@ async function ensureOffscreenDocument() {
 async function clientCrawler(crawlConfig) {
     const {
         crawl_id,
-        user_id,
         start_urls,
         max_links,
         follow_external,
         depth_limit,
-        concurrent_requests,
         delay,
         only_child_pages,
-        crawl_session_id
+        crawl_session_id,
+        concurrent_requests // Maximum concurrent requests
     } = crawlConfig;
 
-    let queue = [];
+    let queue = start_urls.map(url => ({ url, depth: 0 }));
     let visited = new Set();
     let linkCount = 0;
-
-    // Initialize the queue with the start URLs
-    start_urls.forEach(url => queue.push({ url, depth: 0 }));
 
     const baseUrl = new URL(start_urls[0]);
     const baseDomain = baseUrl.hostname;
     let basePath = baseUrl.pathname;
 
-    // Adjust basePath for only_child_pages
     if (only_child_pages) {
-        if (basePath.includes('.')) {
-            basePath = basePath.substring(0, basePath.lastIndexOf('/') + 1);
+        let pathSegments = basePath.split('/').filter(segment => segment); // Remove empty segments
+
+        // Handle the case where the last segment is a file, e.g., 'en.html' -> 'en'
+        if (pathSegments.length > 0 && pathSegments[pathSegments.length - 1].includes('.')) {
+            pathSegments[pathSegments.length - 1] = pathSegments[pathSegments.length - 1].split('.')[0];
         }
-        if (!basePath.endsWith('/')) {
-            basePath += '/';
+        // Join the path segments back, forming the desired top-level path
+        basePath =  `/${pathSegments.join('/')}`;
+        console.log("basePath => ", basePath);
+    }     
+
+    async function processQueue() {
+        while (queue.length > 0 && linkCount < max_links) {
+            const currentBatch = queue.splice(0, concurrent_requests);
+    
+            await Promise.all(
+                currentBatch.map(async ({ url, depth }) => {
+                    // Centralized check for linkCount
+                    if (linkCount >= max_links) return;
+    
+                    if (visited.has(url) || depth > depth_limit) {
+                        return; // Skip if already visited or depth limit exceeded
+                    }
+    
+                    visited.add(url);
+    
+                    try {
+                        const response = await fetch(url, { credentials: 'omit' });
+                        const contentType = response.headers.get('Content-Type');
+                        if (!contentType || !contentType.includes('text/html')) return;
+    
+                        const html = await response.text();
+                        const parsedData = await parseHTMLInOffscreen(html, url);
+                        const { title, text, links, faviconUrl } = parsedData;
+    
+                        // Increment the counter and check after incrementing
+                        linkCount++;
+                        if (linkCount > max_links) return;
+    
+                        const websiteData = {
+                            website_url: url,
+                            title,
+                            text,
+                            html,
+                            status: true,
+                            crawl_session_id,
+                            favicon_url: faviconUrl
+                        };
+    
+                        await fetch(`${API_URL}/store-website-data/`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                website_data: websiteData,
+                                crawl_session_update: { crawl_id, link_count: linkCount }
+                            })
+                        });
+    
+                        if (depth < depth_limit && linkCount < max_links) {
+                            for (const link of links) {
+                                if (linkCount >= max_links) break; // Stop processing new links
+    
+                                const linkUrl = new URL(link);
+    
+                                if (!follow_external && linkUrl.hostname !== baseDomain) continue;
+    
+                                if (only_child_pages) {
+                                    let linkPath = linkUrl.pathname;
+                                    linkPath = linkPath.includes('.') ? linkPath.substring(0, linkPath.lastIndexOf('/') + 1) : linkPath;
+                                    if (!linkPath.endsWith('/')) linkPath += '/';
+                                    if (!linkPath.startsWith(basePath)) continue;
+                                }
+    
+                                if (!visited.has(link)) {
+                                    queue.push({ url: link, depth: depth + 1 });
+                                }
+                            }
+                        }
+    
+                        if (delay > 0) {
+                            await new Promise(resolve => setTimeout(resolve, delay * 1000));
+                        }
+    
+                    } catch (error) {
+                        console.error(`Error fetching ${url}: ${error}`);
+                    }
+                })
+            );
+    
+            // Ensure no further queue processing if limit is reached after batch
+            if (linkCount >= max_links) break;
         }
     }
 
-    while (queue.length > 0 && linkCount < max_links) {
-        const current = queue.shift();
-        const { url, depth } = current;
-
-        // Skip the URL if already visited or depth exceeds limit
-        if (visited.has(url) || depth > depth_limit) {
-            continue;
-        }
-
-        visited.add(url);
-
-        try {
-            const response = await fetch(url, { credentials: 'omit' });
-            const contentType = response.headers.get('Content-Type');
-            if (!contentType || !contentType.includes('text/html')) {
-                continue;  // Only process HTML content
-            }
-            const html = await response.text();
-
-            // Parse HTML in the offscreen document
-            const parsedData = await parseHTMLInOffscreen(html, url);
-            const { title, text, links, faviconUrl } = parsedData;
-
-            // Send data to backend
-            const websiteData = {
-                website_url: url,
-                title: title,
-                text: text,
-                html: html,
-                status: true,
-                crawl_session_id: crawl_session_id,
-                favicon_url: faviconUrl 
-            };
-            
-            linkCount++;
-
-            // the combined request body
-            const combinedRequest = {
-                website_data: websiteData,  
-                crawl_session_update: {
-                    crawl_id: crawl_id,
-                    link_count: linkCount
-                }
-            };
-
-            // Send the store-data request to your backend API
-            await fetch(`${API_URL}/store-website-data/`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(combinedRequest)
-            }).then(response => {
-                if (response.ok) {
-                    console.log("Data stored and crawl session updated successfully");
-                } else {
-                    console.error("Error while processing the request:", response);
-                }
-            }).catch(error => {
-                console.error("Request failed:", error);
-            });
-
-            // Crawl links found in the current page (child links)
-            for (const link of links) {
-                const linkUrl = new URL(link);
-
-                // Apply follow_external and only_child_pages filters
-                if (!follow_external && linkUrl.hostname !== baseDomain) {
-                    continue;
-                }
-
-                if (only_child_pages) {
-                    let linkPath = linkUrl.pathname;
-                    if (linkPath.includes('.')) {
-                        linkPath = linkPath.substring(0, linkPath.lastIndexOf('/') + 1);
-                    }
-                    if (!linkPath.endsWith('/')) {
-                        linkPath += '/';
-                    }
-                    if (!linkPath.startsWith(basePath)) {
-                        continue;
-                    }
-                }
-
-                // If the link is not visited, add it to the queue for further crawling
-                if (!visited.has(link)) {
-                    queue.push({ url: link, depth: depth + 1 });
-                }
-            }
-
-            // Delay if needed
-            if (delay > 0) {
-                await new Promise(resolve => setTimeout(resolve, delay * 1000));
-            }
-
-        } catch (error) {
-            console.error(`Error fetching ${url}: ${error}`);
-        }
-    }
+    await processQueue();
 
     // Update crawl session status to 'completed' in backend
     await fetch(`${API_URL}/store-website-data/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            crawl_session_update: {
-            crawl_id: crawl_id,
-            status: "completed"
-            }
+            crawl_session_update: { crawl_id, status: "completed" }
         })
     });
 
-    console.log('Client-side crawling completed');
-
-    // Close the offscreen document
     await chrome.offscreen.closeDocument();
+    console.log('Client-side crawling completed');
 }
 
 async function parseHTMLInOffscreen(html, url) {
     return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({ action: 'parseHTML', html, url }, (response) => {
             if (chrome.runtime.lastError) {
-                console.error(chrome.runtime.lastError);
                 reject(chrome.runtime.lastError);
             } else {
                 resolve(response);
