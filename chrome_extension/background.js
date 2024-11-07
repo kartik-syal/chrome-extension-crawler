@@ -29,6 +29,13 @@ async function startClientCrawl(crawlConfig) {
 
     if (response.ok) {
         const result = await response.json();
+        
+        // Check for the custom header 'user-uuid-update'
+        const updatedUUID = response.headers.get("user-uuid-update");
+        if (updatedUUID) {
+            // Update the userUUID in Chrome storage
+            chrome.storage.local.set({ userUUID: updatedUUID });
+        }
         const crawlId = result.crawl_id;
 
         // Ensure the offscreen document is created
