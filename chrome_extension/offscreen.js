@@ -7,12 +7,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const doc = parser.parseFromString(html, 'text/html');
 
         const title = doc.querySelector('title') ? doc.querySelector('title').innerText : '';
+
+        // Remove all <style> and <script> elements from the document
+        doc.querySelectorAll('style, script').forEach(el => el.remove());
+
+        // Get clean text content from the document body, excluding styles and scripts
         const text = doc.body ? doc.body.innerText : '';
 
-        // Extract links
+        // Get the base URL for resolving relative links
+        const baseUrl = new URL(url);
+
+        // Extract and convert links to absolute URLs
         const links = Array.from(doc.querySelectorAll('a[href]'))
-            .map(a => a.href)
-            .filter(href => href.startsWith('http'));
+            .map(a => {
+                const href = a.getAttribute('href');
+                return href.startsWith('http') ? href : new URL(href, baseUrl).href;
+            })
+            .filter(href => href.startsWith('http'));  // Ensure it's a valid HTTP(S) link
 
         // Extract favicon URL
         let faviconUrl = '';
@@ -23,13 +34,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         // Resolve relative favicon URL
         if (faviconUrl && !faviconUrl.startsWith('http')) {
-            // If the favicon is relative, resolve it using the page's origin
-            const baseUrl = new URL(url).origin;
-            faviconUrl = new URL(faviconUrl, baseUrl).href;
+            faviconUrl = new URL(faviconUrl, baseUrl.origin).href;
         }
 
         // Send parsed data back to the client
         sendResponse({ title, text, links, faviconUrl });
     }
-    return true; // Indicates asynchronous response
+    return true;  // Indicates asynchronous response
 });
