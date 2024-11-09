@@ -29,11 +29,11 @@ def main():
             WebSpider,
             crawl_id=crawl_id,
             start_urls=request_data['start_urls'],
-            max_links=request_data.get('max_links', 10),
+            max_links=request_data.get('max_links', 100),
             follow_external=request_data.get('follow_external', False),
-            depth_limit=request_data.get('depth_limit', 2),
+            depth_limit=request_data.get('depth_limit', 1),
             delay=request_data.get('delay', 0.1),
-            concurrent_requests=request_data.get('concurrent_requests', 16),
+            concurrent_requests=request_data.get('concurrent_requests', 12),
             only_child_pages=request_data.get('only_child_pages', False),
             results=[]
         )

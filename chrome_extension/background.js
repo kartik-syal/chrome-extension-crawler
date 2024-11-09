@@ -98,6 +98,14 @@ async function clientCrawler(crawlConfig) {
         console.log("basePath => ", basePath);
     }     
 
+    function normalizeUrl(url) {
+        // Normalize URL by removing fragment (#...) and trailing slash if present
+        const parsedUrl = new URL(url);
+        parsedUrl.hash = '';  // Remove fragment
+        parsedUrl.pathname = parsedUrl.pathname.replace(/\/$/, '');  // Remove trailing slash
+        return parsedUrl.toString();
+    }
+
     async function processQueue() {
         while (queue.length > 0 && linkCount < max_links) {
             const currentBatch = queue.splice(0, concurrent_requests);
@@ -106,12 +114,14 @@ async function clientCrawler(crawlConfig) {
                 currentBatch.map(async ({ url, depth }) => {
                     // Centralized check for linkCount
                     if (linkCount >= max_links) return;
+
+                    const normalizedUrl = normalizeUrl(url);
     
-                    if (visited.has(url) || depth > depth_limit) {
+                    if (visited.has(normalizedUrl) || depth > depth_limit) {
                         return; // Skip if already visited or depth limit exceeded
                     }
     
-                    visited.add(url);
+                    visited.add(normalizedUrl);
     
                     try {
                         const response = await fetch(url, { credentials: 'omit' });
@@ -160,8 +170,9 @@ async function clientCrawler(crawlConfig) {
                                     if (!linkPath.startsWith(basePath)) continue;
                                 }
     
-                                if (!visited.has(link)) {
-                                    queue.push({ url: link, depth: depth + 1 });
+                                const normalizedLink = normalizeUrl(link);
+                                if (!visited.has(normalizedLink)) {
+                                    queue.push({ url: normalizedLink, depth: depth + 1 });
                                 }
                             }
                         }

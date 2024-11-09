@@ -25,10 +25,10 @@ crawler_processes = {}
 class ScrapyRequest(BaseModel):
     crawl_name: str
     start_urls: List[str]
-    max_links: int = 10
+    max_links: int = 100
     follow_external: bool = False
-    depth_limit: int = 2
-    concurrent_requests: int = 16
+    depth_limit: int = 1
+    concurrent_requests: int = 12
     delay: float = 0.0  # Delay for content crawling
     user_id: str
     only_child_pages: bool = False

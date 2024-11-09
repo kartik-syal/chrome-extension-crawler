@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 class WebSpider(scrapy.Spider):
     name = 'web_spider'
 
-    def __init__(self, crawl_id=None, start_urls=None, max_links=10, follow_external=False, depth_limit=2, concurrent_requests=16, only_child_pages=False, *args, **kwargs):
+    def __init__(self, crawl_id=None, start_urls=None, max_links=100, follow_external=False, depth_limit=1, concurrent_requests=12, only_child_pages=False, *args, **kwargs):
         super(WebSpider, self).__init__(*args, **kwargs)
         self.crawl_id = crawl_id
         self.max_links = int(max_links)
@@ -97,7 +97,7 @@ class WebSpider(scrapy.Spider):
         # Start from the remaining pending URLs
         for url in self.pending_urls:
             if self.link_count < self.max_links and self.should_continue:
-                yield scrapy.Request(url, callback=self.parse)
+                yield scrapy.Request(url, callback=self.parse, meta={'depth': 0})
 
     def is_child_page(self, url):
         """Check if the URL is a child page of the base URL"""
@@ -118,6 +118,14 @@ class WebSpider(scrapy.Spider):
     def parse(self, response):
         if self.link_count >= self.max_links:
             self.logger.info(f"Max links ({self.max_links}) reached. Stopping crawler.")
+            self.crawler.engine.close_spider(self, 'finished')
+            return
+        
+        current_depth = response.meta.get('depth', 0)  # Get depth from meta
+
+        # Check if we've reached the max depth
+        if current_depth > self.depth_limit:
+            self.logger.info(f"Max depth ({self.depth_limit}) reached for URL: {response.url}. Skipping deeper links.")
             self.crawler.engine.close_spider(self, 'finished')
             return
 
@@ -169,7 +177,7 @@ class WebSpider(scrapy.Spider):
                             if next_page_url not in self.visited_links and next_page_url not in self.pending_urls:
                                 if (self.follow_external or next_page_netloc == self.base_netloc) and self.is_child_page(next_page_url):
                                     self.pending_urls.append(next_page_url)
-                                    yield scrapy.Request(next_page_url, callback=self.parse)
+                                    yield scrapy.Request(next_page_url, callback=self.parse, meta={'depth': current_depth + 1})
 
         self.save_state()
 
