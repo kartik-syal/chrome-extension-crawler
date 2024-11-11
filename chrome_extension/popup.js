@@ -155,12 +155,26 @@ document.addEventListener("DOMContentLoaded", async function () {
         const crawls = await fetchCrawls(uuid);
         const crawl = crawls.find(c => c.crawl_id === crawlId);
         const action = crawl.status === "paused" ? "resume" : "pause";
-        await fetch(`${API_URL}/${action}-crawl`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ crawl_id: crawlId })
-        });
-        displayCrawls();
+    
+        if (crawl.crawl_location === 'client') {
+            // Send message to background script
+            chrome.runtime.sendMessage({ action: action + 'Crawl', crawlId: crawlId }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error(chrome.runtime.lastError.message);
+                } else {
+                    console.log(response.message);
+                    displayCrawls();
+                }
+            });
+        } else {
+            // Server-side, send request to server
+            await fetch(`${API_URL}/${action}-crawl`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ crawl_id: crawlId })
+            });
+            displayCrawls();
+        }
     }
 
     async function deleteCrawl(crawlId) {

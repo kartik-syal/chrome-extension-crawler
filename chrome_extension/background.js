@@ -1,4 +1,5 @@
 const API_URL = 'http://127.0.0.1:8000';
+const crawlingSessions = {}; // To keep track of active crawling sessions
 
 chrome.runtime.onInstalled.addListener(() => {
     // Ensure UUID creation on first installation
@@ -15,6 +16,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const crawlConfig = message.crawlConfig;
         startClientCrawl(crawlConfig);
         sendResponse({ message: 'Client-side crawling started' });
+    } else if (message.action === 'pauseCrawl') {
+        const crawler = crawlingSessions[message.crawlId];
+        if (crawler) {
+            crawler.pause();
+            sendResponse({ message: 'Crawl paused' });
+        } else {
+            sendResponse({ message: 'Crawl not found' });
+        }
+    } else if (message.action === 'resumeCrawl') {
+        let crawler = crawlingSessions[message.crawlId];
+        if (crawler) {
+            crawler.resume();
+            sendResponse({ message: 'Crawl resumed' });
+        } else {
+            // Try to load state from storage
+            chrome.storage.local.get('crawlState_' + message.crawlId, async (data) => {
+                const state = data['crawlState_' + message.crawlId];
+                if (state) {
+                    // Recreate crawler instance
+                    crawler = new Crawler(state.crawlConfig);
+                    crawler.queue = state.queue;
+                    crawler.visited = new Set(state.visited);
+                    crawler.linkCount = state.linkCount;
+                    // Start the crawler
+                    crawlingSessions[message.crawlId] = crawler;
+                    await crawler.resume();
+                    sendResponse({ message: 'Crawl resumed from saved state' });
+                } else {
+                    sendResponse({ message: 'No saved state found for crawl' });
+                }
+            });
+            return true; // Indicates asynchronous response
+        }
     }
     return true; // Indicates that the response is sent asynchronously
 });
@@ -44,7 +78,9 @@ async function startClientCrawl(crawlConfig) {
         // Start crawling process
         crawlConfig.crawl_id = crawlId;
         crawlConfig.crawl_session_id = result.crawl_session_id;
-        clientCrawler(crawlConfig);
+        const crawler = new Crawler(crawlConfig);
+        crawlingSessions[crawlId] = crawler;
+        crawler.start();
     } else {
         console.error('Failed to create crawl session:', response.statusText);
     }
@@ -65,40 +101,64 @@ async function ensureOffscreenDocument() {
     });
 }
 
-async function clientCrawler(crawlConfig) {
-    const {
-        crawl_id,
-        start_urls,
-        max_links,
-        follow_external,
-        depth_limit,
-        delay,
-        only_child_pages,
-        crawl_session_id,
-        concurrent_requests // Maximum concurrent requests
-    } = crawlConfig;
+class Crawler {
+    constructor(crawlConfig) {
+        const {
+            crawl_id,
+            crawl_session_id,
+            start_urls,
+            max_links,
+            follow_external,
+            depth_limit,
+            delay,
+            only_child_pages,
+            concurrent_requests // Maximum concurrent requests
+        } = crawlConfig;
 
-    let queue = start_urls.map(url => ({ url, depth: 0 }));
-    let visited = new Set();
-    let linkCount = 0;
+        this.crawl_id = crawl_id;
+        this.crawl_session_id = crawl_session_id;
+        this.queue = start_urls.map(url => ({ url, depth: 0 }));
+        this.visited = new Set();
+        this.linkCount = 0;
+        this.isPaused = false;
+        this.processing = false;
+        this.status = 'running';
+        this.abortControllers = [];
+        this.crawlConfig = crawlConfig;
 
-    const baseUrl = new URL(start_urls[0]);
-    const baseDomain = baseUrl.hostname;
-    let basePath = baseUrl.pathname;
+        this.start_urls = start_urls;
+        this.max_links = max_links;
+        this.follow_external = follow_external;
+        this.depth_limit = depth_limit;
+        this.delay = delay;
+        this.only_child_pages = only_child_pages;
+        this.concurrent_requests = concurrent_requests;
 
-    if (only_child_pages) {
-        let pathSegments = basePath.split('/').filter(segment => segment); // Remove empty segments
+        this.baseUrl = new URL(start_urls[0]);
+        this.baseDomain = this.baseUrl.hostname;
+        this.basePath = this.baseUrl.pathname;
 
-        // Handle the case where the last segment is a file, e.g., 'en.html' -> 'en'
-        if (pathSegments.length > 0 && pathSegments[pathSegments.length - 1].includes('.')) {
-            pathSegments[pathSegments.length - 1] = pathSegments[pathSegments.length - 1].split('.')[0];
+        if (only_child_pages) {
+            let pathSegments = this.basePath.split('/').filter(segment => segment); // Remove empty segments
+
+            // Handle the case where the last segment is a file, e.g., 'en.html' -> 'en'
+            if (pathSegments.length > 0 && pathSegments[pathSegments.length - 1].includes('.')) {
+                pathSegments[pathSegments.length - 1] = pathSegments[pathSegments.length - 1].split('.')[0];
+            }
+            // Join the path segments back, forming the desired top-level path
+            this.basePath =  `/${pathSegments.join('/')}`;
+            console.log("basePath => ", this.basePath);
         }
-        // Join the path segments back, forming the desired top-level path
-        basePath =  `/${pathSegments.join('/')}`;
-        console.log("basePath => ", basePath);
-    }     
+    }
 
-    function normalizeUrl(url) {
+    async start() {
+        this.processing = true;
+        await this.processQueue();
+        this.processing = false;
+        delete crawlingSessions[this.crawl_id];
+    }
+
+    normalizeUrl(url) {
         // Normalize URL by removing fragment (#...) and trailing slash if present
         const parsedUrl = new URL(url);
         parsedUrl.hash = '';  // Remove fragment
@@ -106,25 +166,34 @@ async function clientCrawler(crawlConfig) {
         return parsedUrl.toString();
     }
 
-    async function processQueue() {
-        while (queue.length > 0 && linkCount < max_links) {
-            const currentBatch = queue.splice(0, concurrent_requests);
+    async processQueue() {
+        while (this.queue.length > 0 && this.linkCount < this.max_links) {
+            if (this.isPaused) {
+                await this.waitUntilResumed();
+            }
+
+            const currentBatch = this.queue.splice(0, this.concurrent_requests);
     
             await Promise.all(
                 currentBatch.map(async ({ url, depth }) => {
-                    // Centralized check for linkCount
-                    if (linkCount >= max_links) return;
+                    if (this.isPaused) return;
 
-                    const normalizedUrl = normalizeUrl(url);
+                    // Centralized check for linkCount
+                    if (this.linkCount >= this.max_links) return;
+
+                    const normalizedUrl = this.normalizeUrl(url);
     
-                    if (visited.has(normalizedUrl) || depth > depth_limit) {
+                    if (this.visited.has(normalizedUrl) || depth > this.depth_limit) {
                         return; // Skip if already visited or depth limit exceeded
                     }
     
-                    visited.add(normalizedUrl);
+                    this.visited.add(normalizedUrl);
+
+                    const controller = new AbortController();
+                    this.abortControllers.push(controller);
     
                     try {
-                        const response = await fetch(url, { credentials: 'omit' });
+                        const response = await fetch(url, { credentials: 'omit', signal: controller.signal });
                         const contentType = response.headers.get('Content-Type');
                         if (!contentType || !contentType.includes('text/html')) return;
     
@@ -133,8 +202,8 @@ async function clientCrawler(crawlConfig) {
                         const { title, text, links, faviconUrl } = parsedData;
     
                         // Increment the counter and check after incrementing
-                        linkCount++;
-                        if (linkCount > max_links) return;
+                        this.linkCount++;
+                        if (this.linkCount > this.max_links) return;
     
                         const websiteData = {
                             website_url: url,
@@ -142,7 +211,7 @@ async function clientCrawler(crawlConfig) {
                             text,
                             html,
                             status: true,
-                            crawl_session_id,
+                            crawl_session_id: this.crawl_session_id,
                             favicon_url: faviconUrl
                         };
     
@@ -151,60 +220,127 @@ async function clientCrawler(crawlConfig) {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 website_data: websiteData,
-                                crawl_session_update: { crawl_id, link_count: linkCount }
+                                crawl_session_update: { crawl_id: this.crawl_id, link_count: this.linkCount }
                             })
                         });
     
-                        if (depth < depth_limit && linkCount < max_links) {
+                        if (depth < this.depth_limit && this.linkCount < this.max_links) {
                             for (const link of links) {
-                                if (linkCount >= max_links) break; // Stop processing new links
+                                if (this.linkCount >= this.max_links) break; // Stop processing new links
     
                                 const linkUrl = new URL(link);
     
-                                if (!follow_external && linkUrl.hostname !== baseDomain) continue;
+                                if (!this.follow_external && linkUrl.hostname !== this.baseDomain) continue;
     
-                                if (only_child_pages) {
+                                if (this.only_child_pages) {
                                     let linkPath = linkUrl.pathname;
                                     linkPath = linkPath.includes('.') ? linkPath.substring(0, linkPath.lastIndexOf('/') + 1) : linkPath;
                                     if (!linkPath.endsWith('/')) linkPath += '/';
-                                    if (!linkPath.startsWith(basePath)) continue;
+                                    if (!linkPath.startsWith(this.basePath)) continue;
                                 }
     
-                                const normalizedLink = normalizeUrl(link);
-                                if (!visited.has(normalizedLink)) {
-                                    queue.push({ url: normalizedLink, depth: depth + 1 });
+                                const normalizedLink = this.normalizeUrl(link);
+                                if (!this.visited.has(normalizedLink)) {
+                                    this.queue.push({ url: normalizedLink, depth: depth + 1 });
                                 }
                             }
                         }
     
-                        if (delay > 0) {
-                            await new Promise(resolve => setTimeout(resolve, delay * 1000));
+                        if (this.delay > 0) {
+                            await new Promise(resolve => setTimeout(resolve, this.delay * 1000));
                         }
     
                     } catch (error) {
-                        console.error(`Error fetching ${url}: ${error}`);
+                        if (error.name === 'AbortError') {
+                            console.log(`Fetch aborted for ${url}`);
+                        } else {
+                            console.error(`Error fetching ${url}: ${error}`);
+                        }
+                    } finally {
+                        this.abortControllers = this.abortControllers.filter(c => c !== controller);
                     }
                 })
             );
     
             // Ensure no further queue processing if limit is reached after batch
-            if (linkCount >= max_links) break;
+            if (this.linkCount >= this.max_links) break;
+
+            if (this.isPaused) {
+                await this.waitUntilResumed();
+            }
+        }
+
+        // Update crawl session status to 'completed' in backend
+        await fetch(`${API_URL}/store-website-data/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                crawl_session_update: { crawl_id: this.crawl_id, status: "completed" }
+            })
+        });
+    
+        await chrome.offscreen.closeDocument();
+        console.log('Client-side crawling completed');
+    }
+
+    pause() {
+        this.isPaused = true;
+        this.status = 'paused';
+
+        // Abort ongoing fetch requests
+        this.abortControllers.forEach(controller => controller.abort());
+        this.abortControllers = [];
+
+        // Save state to storage
+        const state = {
+            crawl_id: this.crawl_id,
+            crawl_session_id: this.crawl_session_id,
+            queue: this.queue,
+            visited: Array.from(this.visited),
+            linkCount: this.linkCount,
+            // ... other properties
+            crawlConfig: this.crawlConfig
+        };
+        chrome.storage.local.set({ ['crawlState_' + this.crawl_id]: state });
+
+        // Update crawl session status in backend
+        fetch(`${API_URL}/store-website-data/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                crawl_session_update: { crawl_id: this.crawl_id, status: "paused" }
+            })
+        });
+    }
+
+    async resume() {
+        this.isPaused = false;
+        this.status = 'running';
+
+        // Update crawl session status in backend
+        await fetch(`${API_URL}/store-website-data/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                crawl_session_update: { crawl_id: this.crawl_id, status: "running" }
+            })
+        });
+
+        if (!this.processing) {
+            this.start();
         }
     }
 
-    await processQueue();
-
-    // Update crawl session status to 'completed' in backend
-    await fetch(`${API_URL}/store-website-data/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            crawl_session_update: { crawl_id, status: "completed" }
-        })
-    });
-
-    await chrome.offscreen.closeDocument();
-    console.log('Client-side crawling completed');
+    async waitUntilResumed() {
+        return new Promise(resolve => {
+            const interval = setInterval(() => {
+                if (!this.isPaused) {
+                    clearInterval(interval);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
 }
 
 async function parseHTMLInOffscreen(html, url) {
